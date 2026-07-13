@@ -49,8 +49,8 @@ public class MainActivity extends Activity {
         mDpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         mAdminComponent = new ComponentName(this, KioskDeviceAdminReceiver.class);
 
+        setupLockTaskPackages();
         hideSystemUI();
-        enableLockTask();
         setupNavButtons();
     }
 
@@ -143,10 +143,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        setupLockTaskPackages();
         if (mSystemBarsHidden) {
-            hideSystemUI();
+            hideSystemUI();  // 内部会调用 enterLockTask()
         }
-        enableLockTask();
         mHandler.postDelayed(mKeepFullscreenTask, 500);
     }
 
@@ -165,15 +165,18 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 启用 Lock Task Mode（屏幕固定）
+     * 设置 Lock Task 白名单（仅设置 DPM 策略，不调用 startLockTask）
      */
-    private void enableLockTask() {
-        // 必须是设备所有者才能调用 setLockTaskPackages
+    private void setupLockTaskPackages() {
         if (mDpm != null && mDpm.isDeviceOwnerApp(getPackageName())) {
             mDpm.setLockTaskPackages(mAdminComponent, new String[]{getPackageName()});
         }
+    }
 
-        // 启动屏幕固定
+    /**
+     * 进入锁定模式
+     */
+    private void enterLockTask() {
         try {
             startLockTask();
         } catch (Exception e) {
@@ -182,7 +185,18 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 隐藏系统 UI（状态栏 + 导航栏）
+     * 退出锁定模式
+     */
+    private void exitLockTask() {
+        try {
+            stopLockTask();
+        } catch (Exception e) {
+            android.util.Log.e("Kiosk", "stopLockTask failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 隐藏系统 UI（状态栏 + 导航栏）并进入 Lock Task
      */
     private void hideSystemUI() {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -207,12 +221,18 @@ public class MainActivity extends Activity {
                             | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_FULLSCREEN);
         }
+
+        // 重新进入 Lock Task 模式
+        enterLockTask();
     }
 
     /**
-     * 显示系统 UI（状态栏 + 导航栏）
+     * 显示系统 UI（状态栏 + 导航栏），先退出 Lock Task
      */
     private void showSystemUI() {
+        // 必须先退出 Lock Task，否则系统会强制隐藏导航栏
+        exitLockTask();
+
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         View decorView = getWindow().getDecorView();
@@ -220,6 +240,8 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             WindowInsetsController controller = getWindow().getInsetsController();
             if (controller != null) {
+                controller.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_DEFAULT);
                 controller.show(WindowInsets.Type.statusBars()
                         | WindowInsets.Type.navigationBars());
             }
