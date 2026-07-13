@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Kiosk" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+    <style name="Theme.Kiosk.Fullscreen" parent="Theme.Kiosk">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>
