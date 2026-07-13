@@ -1,27 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/container"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#FFFFFF"
-    android:keepScreenOn="true">
+    android:keepScreenOn="true"
+    android:orientation="vertical">
 
-    <WebView
-        android:id="@+id/webview"
+    <!-- 主内容区域 -->
+    <FrameLayout
+        android:id="@+id/content_area"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-    <!-- 占位内容：可在运行时替换为 WebView/自定义界面 -->
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
-        android:text="Kiosk 模式已启动\n状态栏下拉已禁用"
-        android:textAlignment="center"
-        android:textColor="#333333"
-        android:textSize="24sp"
-        android:lineSpacingExtra="8dp" />
+        <WebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
 
-</RelativeLayout>
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="Kiosk 模式已启动\n状态栏下拉已禁用"
+            android:textAlignment="center"
+            android:textColor="#333333"
+            android:textSize="24sp"
+            android:lineSpacingExtra="8dp" />
+    </FrameLayout>
+
+    <!-- 底部导航栏 -->
+    <LinearLayout
+        android:id="@+id/nav_bar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="#EEEEEE"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <Button
+            android:id="@+id/btn_back"
+            style="@style/NavButton"
+            android:text="← 返回" />
+
+        <Button
+            android:id="@+id/btn_home"
+            style="@style/NavButton"
+            android:text="主页" />
+
+        <Button
+            android:id="@+id/btn_refresh"
+            style="@style/NavButton"
+            android:text="刷新" />
+
+        <Button
+            android:id="@+id/btn_exit"
+            style="@style/NavButton.Exit"
+            android:text="退出" />
+    </LinearLayout>
+
+</LinearLayout>

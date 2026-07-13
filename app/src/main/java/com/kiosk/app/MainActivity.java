@@ -12,6 +12,9 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.webkit.WebView;
+import android.widget.Button;
+import android.widget.Toast;
 
 /**
  * Kiosk 主 Activity
@@ -22,6 +25,9 @@ public class MainActivity extends Activity {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private DevicePolicyManager mDpm;
     private ComponentName mAdminComponent;
+    private WebView mWebView;
+    private int mExitClickCount = 0;
+    private long mExitLastClickTime = 0;
 
     private final Runnable mKeepFullscreenTask = new Runnable() {
         @Override
@@ -41,6 +47,77 @@ public class MainActivity extends Activity {
 
         hideSystemUI();
         enableLockTask();
+        setupNavButtons();
+    }
+
+    /**
+     * 初始化底部导航按钮
+     */
+    private void setupNavButtons() {
+        mWebView = findViewById(R.id.webview);
+
+        // 返回
+        Button btnBack = findViewById(R.id.btn_back);
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mWebView != null && mWebView.canGoBack()) {
+                    mWebView.goBack();
+                }
+            }
+        });
+
+        // 主页
+        Button btnHome = findViewById(R.id.btn_home);
+        btnHome.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mWebView != null && mWebView.getUrl() != null) {
+                    mWebView.reload();
+                }
+            }
+        });
+
+        // 刷新
+        Button btnRefresh = findViewById(R.id.btn_refresh);
+        btnRefresh.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mWebView != null && mWebView.getUrl() != null) {
+                    mWebView.reload();
+                } else {
+                    recreate();
+                }
+            }
+        });
+
+        // 退出（连点 5 次才能退出，防止误触）
+        Button btnExit = findViewById(R.id.btn_exit);
+        btnExit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                long now = System.currentTimeMillis();
+                if (now - mExitLastClickTime > 3000) {
+                    mExitClickCount = 0;
+                }
+                mExitLastClickTime = now;
+                mExitClickCount++;
+
+                int remain = 5 - mExitClickCount;
+                if (remain > 0) {
+                    Toast.makeText(MainActivity.this,
+                            "再点击 " + remain + " 次退出 Kiosk 模式",
+                            Toast.LENGTH_SHORT).show();
+                } else {
+                    try {
+                        stopLockTask();
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                    finishAffinity();
+                }
+            }
+        });
     }
 
     @Override
