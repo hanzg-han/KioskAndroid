@@ -8,6 +8,7 @@
 
     <!-- 全屏 Kiosk 主题 -->
     <style name="Theme.Kiosk.Fullscreen" parent="Theme.Kiosk">
+        <item name="android:windowBackground">@android:color/white</item>
         <item name="android:windowTranslucentStatus">true</item>
         <item name="android:windowTranslucentNavigation">true</item>
     </style>
