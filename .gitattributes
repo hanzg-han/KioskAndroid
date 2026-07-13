@@ -1,0 +1,14 @@
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.java text
+*.xml text
+*.kts text
+*.gradle text
+*.properties text
+*.pro text
+*.yml text
+*.yaml text
+*.json text
+*.md text
+*.txt text
