@@ -26,13 +26,17 @@ public class MainActivity extends Activity {
     private DevicePolicyManager mDpm;
     private ComponentName mAdminComponent;
     private WebView mWebView;
+    private Button mBtnNavBar;
     private int mExitClickCount = 0;
     private long mExitLastClickTime = 0;
+    private boolean mSystemBarsHidden = true; // 默认隐藏系统导航栏
 
     private final Runnable mKeepFullscreenTask = new Runnable() {
         @Override
         public void run() {
-            hideSystemUI();
+            if (mSystemBarsHidden) {
+                hideSystemUI();
+            }
             mHandler.postDelayed(this, 500);
         }
     };
@@ -91,6 +95,22 @@ public class MainActivity extends Activity {
             }
         });
 
+        // 显示/隐藏系统导航栏
+        mBtnNavBar = findViewById(R.id.btn_navbar);
+        updateNavBarButtonText();
+        mBtnNavBar.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                mSystemBarsHidden = !mSystemBarsHidden;
+                if (mSystemBarsHidden) {
+                    hideSystemUI();
+                } else {
+                    showSystemUI();
+                }
+                updateNavBarButtonText();
+            }
+        });
+
         // 退出（连点 5 次才能退出，防止误触）
         Button btnExit = findViewById(R.id.btn_exit);
         btnExit.setOnClickListener(new View.OnClickListener() {
@@ -123,7 +143,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        hideSystemUI();
+        if (mSystemBarsHidden) {
+            hideSystemUI();
+        }
         enableLockTask();
         mHandler.postDelayed(mKeepFullscreenTask, 500);
     }
@@ -137,7 +159,7 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
+        if (hasFocus && mSystemBarsHidden) {
             hideSystemUI();
         }
     }
@@ -184,6 +206,34 @@ public class MainActivity extends Activity {
                             | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                             | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    /**
+     * 显示系统 UI（状态栏 + 导航栏）
+     */
+    private void showSystemUI() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+        View decorView = getWindow().getDecorView();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.show(WindowInsets.Type.statusBars()
+                        | WindowInsets.Type.navigationBars());
+            }
+        } else {
+            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        }
+    }
+
+    /**
+     * 根据当前状态更新导航栏按钮文字
+     */
+    private void updateNavBarButtonText() {
+        if (mBtnNavBar != null) {
+            mBtnNavBar.setText(mSystemBarsHidden ? "显示导航栏" : "隐藏导航栏");
         }
     }
 

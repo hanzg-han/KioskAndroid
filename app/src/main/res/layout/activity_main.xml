@@ -59,6 +59,11 @@
             android:text="刷新" />
 
         <Button
+            android:id="@+id/btn_navbar"
+            style="@style/NavButton"
+            android:text="导航栏" />
+
+        <Button
             android:id="@+id/btn_exit"
             style="@style/NavButton.Exit"
             android:text="退出" />
