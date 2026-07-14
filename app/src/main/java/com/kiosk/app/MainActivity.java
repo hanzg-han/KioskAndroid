@@ -22,7 +22,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.6";
+    private static final String APP_VERSION = "1.0.7";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -145,11 +145,6 @@ public class MainActivity extends Activity {
                             "再点击 " + remain + " 次退出 Kiosk 模式",
                             Toast.LENGTH_SHORT).show();
                 } else {
-                    try {
-                        stopLockTask();
-                    } catch (Exception e) {
-                        // ignore
-                    }
                     finishAffinity();
                 }
             }
@@ -190,14 +185,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 进入锁定模式
+     * 进入锁定模式（仅标记，实际不调用 startLockTask 避免系统提示框）
+     * DPM setLockTaskPackages 已通过 Device Owner 策略锁定，无需 startLockTask
      */
     private void enterLockTask() {
-        try {
-            startLockTask();
-        } catch (Exception e) {
-            android.util.Log.e("Kiosk", "startLockTask failed: " + e.getMessage());
-        }
+        // 不调用 startLockTask()，避免弹出"应用已固定"的系统提示框
+        // Device Owner 的 setLockTaskPackages 已足够阻止用户退出
     }
 
     /**
@@ -207,7 +200,7 @@ public class MainActivity extends Activity {
         try {
             stopLockTask();
         } catch (Exception e) {
-            android.util.Log.e("Kiosk", "stopLockTask failed: " + e.getMessage());
+            // 可能未处于 Lock Task 状态，忽略
         }
     }
 
