@@ -22,7 +22,10 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.4";
+    private static final String APP_VERSION = "1.0.5";
+
+    private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
+    private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private DevicePolicyManager mDpm;
@@ -212,6 +215,9 @@ public class MainActivity extends Activity {
      * 隐藏系统 UI（状态栏 + 导航栏）并进入 Lock Task
      */
     private void hideSystemUI() {
+        // 恢复默认 DPI
+        setDisplayDensity(DPI_DEFAULT);
+
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -240,9 +246,23 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * 通过 shell 设置屏幕 DPI
+     */
+    private void setDisplayDensity(int density) {
+        try {
+            Runtime.getRuntime().exec("wm density " + density);
+        } catch (Exception e) {
+            android.util.Log.e("Kiosk", "setDisplayDensity failed: " + e.getMessage());
+        }
+    }
+
+    /**
      * 显示系统 UI（状态栏 + 导航栏），先退出 Lock Task，延迟后显示
      */
     private void showSystemUI() {
+        // 降低 DPI 让导航栏有空间显示
+        setDisplayDensity(DPI_NAVBAR);
+
         // 先退出 Lock Task
         exitLockTask();
 
