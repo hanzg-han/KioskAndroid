@@ -22,7 +22,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.5";
+    private static final String APP_VERSION = "1.0.6";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -257,56 +257,25 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 显示系统 UI（状态栏 + 导航栏），先退出 Lock Task，延迟后显示
+     * 显示系统 UI（状态栏 + 导航栏）
+     * 核心：降低 DPI 为系统导航栏腾出空间，再退出 Lock Task 并显示系统栏
      */
     private void showSystemUI() {
-        // 降低 DPI 让导航栏有空间显示
         setDisplayDensity(DPI_NAVBAR);
-
-        // 先退出 Lock Task
         exitLockTask();
-
-        // 立即清除全屏标志
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-        // 延迟后分步强制显示系统栏
-        mHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                View decorView = getWindow().getDecorView();
-
-                // Step 1: 清除所有沉浸式/隐藏标志，仅保留 LAYOUT_STABLE
-                decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-
-                // Step 2: 通知系统我们要自己绘制系统栏背景
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-                getWindow().setNavigationBarColor(0xFF000000);
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    WindowInsetsController controller = getWindow().getInsetsController();
-                    if (controller != null) {
-                        controller.setSystemBarsBehavior(
-                                WindowInsetsController.BEHAVIOR_DEFAULT);
-                        controller.show(WindowInsets.Type.statusBars()
-                                | WindowInsets.Type.navigationBars());
-                    }
-                }
-
-                decorView.requestLayout();
-
-                Toast.makeText(MainActivity.this, "已显示系统导航栏", Toast.LENGTH_SHORT).show();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_DEFAULT);
+                controller.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
             }
-        }, 400);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        }
 
-        // 第二次延迟确保生效
-        mHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                View decorView = getWindow().getDecorView();
-                decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-                decorView.requestLayout();
-            }
-        }, 800);
+        Toast.makeText(this, "已显示系统导航栏", Toast.LENGTH_SHORT).show();
     }
 
     /**
