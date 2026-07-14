@@ -22,6 +22,8 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
+    private static final String APP_VERSION = "1.0.4";
+
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private DevicePolicyManager mDpm;
     private ComponentName mAdminComponent;
@@ -51,7 +53,18 @@ public class MainActivity extends Activity {
 
         setupLockTaskPackages();
         hideSystemUI();
+        showVersion();
         setupNavButtons();
+    }
+
+    /**
+     * 在页面显示版本号
+     */
+    private void showVersion() {
+        android.widget.TextView tvStatus = findViewById(R.id.tv_status);
+        if (tvStatus != null) {
+            tvStatus.setText("Kiosk 模式已启动\n状态栏下拉已禁用\n版本: " + APP_VERSION);
+        }
     }
 
     /**
@@ -230,21 +243,26 @@ public class MainActivity extends Activity {
      * 显示系统 UI（状态栏 + 导航栏），先退出 Lock Task，延迟后显示
      */
     private void showSystemUI() {
-        // 先退出 Lock Task，否则系统会强制隐藏导航栏
+        // 先退出 Lock Task
         exitLockTask();
 
         // 立即清除全屏标志
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-        // 延迟执行，等系统完全退出 Lock Task 后再显示导航栏
+        // 延迟后分步强制显示系统栏
         mHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 View decorView = getWindow().getDecorView();
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    getWindow().setDecorFitsSystemWindows(true);
+                // Step 1: 清除所有沉浸式/隐藏标志，仅保留 LAYOUT_STABLE
+                decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
 
+                // Step 2: 通知系统我们要自己绘制系统栏背景
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                getWindow().setNavigationBarColor(0xFF000000);
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     WindowInsetsController controller = getWindow().getInsetsController();
                     if (controller != null) {
                         controller.setSystemBarsBehavior(
@@ -254,13 +272,21 @@ public class MainActivity extends Activity {
                     }
                 }
 
-                // 清除所有 SystemUiVisibility 标志，让系统栏正常显示
-                decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                decorView.requestLayout();
 
-                // 强制刷新布局
+                Toast.makeText(MainActivity.this, "已显示系统导航栏", Toast.LENGTH_SHORT).show();
+            }
+        }, 400);
+
+        // 第二次延迟确保生效
+        mHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                View decorView = getWindow().getDecorView();
+                decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
                 decorView.requestLayout();
             }
-        }, 500);
+        }, 800);
     }
 
     /**
