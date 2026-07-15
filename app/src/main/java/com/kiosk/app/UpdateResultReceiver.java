@@ -23,7 +23,11 @@ public class UpdateResultReceiver extends BroadcastReceiver {
 
         switch (status) {
             case PackageInstaller.STATUS_SUCCESS:
-                Log.d(TAG, "Install success, app will restart");
+                Log.d(TAG, "Install success, launching MainActivity");
+                // 安装成功，启动 MainActivity
+                Intent launchIntent = new Intent(context, MainActivity.class);
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(launchIntent);
                 break;
             case PackageInstaller.STATUS_FAILURE_STORAGE:
                 Log.e(TAG, "Install failed: storage error - " + msg);

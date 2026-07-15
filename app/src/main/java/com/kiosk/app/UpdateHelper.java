@@ -218,24 +218,19 @@ public class UpdateHelper {
                 session.fsync(out);
             }
 
-            // 提交安装，安装完成后自动启动 MainActivity
-            Intent launchIntent = new Intent(context, MainActivity.class);
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            PendingIntent pending = PendingIntent.getActivity(
-                    context, 0, launchIntent,
-                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            // 提交安装，安装完成后通过广播通知 UpdateResultReceiver 重启 App
+            Intent intent = new Intent(context, UpdateResultReceiver.class);
+            PendingIntent pending = PendingIntent.getBroadcast(
+                    context, 0, intent,
+                    PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             session.commit(pending.getIntentSender());
             session.close();
 
-            Log.d(TAG, "Install committed, killing self to allow install");
+            Log.d(TAG, "Install session committed, waiting for system to install");
 
-            // 通知成功
+            // 通知 UI
             runOnUi(callback, () -> callback.onInstallSuccess());
-
-            // 短暂延迟确保回调显示，然后主动杀进程让系统完成安装
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            android.os.Process.killProcess(android.os.Process.myPid());
 
         } catch (Exception e) {
             Log.e(TAG, "Install failed", e);
