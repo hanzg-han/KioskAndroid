@@ -218,10 +218,11 @@ public class UpdateHelper {
                 session.fsync(out);
             }
 
-            // 提交安装（不需要 PendingIntent 回调也可以，系统会自动重启 App）
-            Intent intent = new Intent(context, UpdateResultReceiver.class);
-            PendingIntent pending = PendingIntent.getBroadcast(
-                    context, 0, intent,
+            // 提交安装，安装完成后自动启动 MainActivity
+            Intent launchIntent = new Intent(context, MainActivity.class);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            PendingIntent pending = PendingIntent.getActivity(
+                    context, 0, launchIntent,
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             session.commit(pending.getIntentSender());
@@ -233,7 +234,7 @@ public class UpdateHelper {
             runOnUi(callback, () -> callback.onInstallSuccess());
 
             // 删除 APK 文件
-            apkFile.delete();
+            apkFile.deleteOnExit();
 
         } catch (Exception e) {
             Log.e(TAG, "Install failed", e);
