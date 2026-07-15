@@ -12,32 +12,44 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * 更新日志工具，写入文件，可通过 adb pull 拉取
- * 路径: /sdcard/Android/data/com.kiosk.app/files/kiosk_update.log
+ * 更新日志工具
+ * 主路径(内部存储, 无需权限): /data/data/com.kiosk.app/files/kiosk_update.log
+ *   读取方式: adb shell run-as com.kiosk.app cat files/kiosk_update.log
+ * 备用路径: /sdcard/kiosk_update.log (部分设备可能写入失败)
  */
 public class UpdateLog {
 
     private static final String TAG = "KioskUpdate";
     private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
-    private static String sLogPath = null;
+    private static String sPrimaryPath = null;   // 内部存储，一定可用
+    private static String sExtPath = null;       // /sdcard/，不一定可用
 
-    /** 初始化，必须在首次写日志前调用 */
     public static synchronized void init(Context context) {
-        if (sLogPath != null) return;
+        if (sPrimaryPath != null) return;
         try {
-            File dir = context.getExternalFilesDir(null);
-            if (dir == null) {
-                // fallback to internal
-                dir = new File(context.getFilesDir(), "logs");
-                dir.mkdirs();
-            }
-            sLogPath = new File(dir, "kiosk_update.log").getAbsolutePath();
-            // 截断旧日志，保留最后 500KB
-            File logFile = new File(sLogPath);
+            // 主路径: 内部存储，100% 可用，无需权限
+            File internalDir = new File(context.getFilesDir(), "logs");
+            internalDir.mkdirs();
+            sPrimaryPath = new File(internalDir, "kiosk_update.log").getAbsolutePath();
+
+            // 截断旧日志
+            File logFile = new File(sPrimaryPath);
             if (logFile.exists() && logFile.length() > 500 * 1024) {
                 logFile.delete();
             }
-            write("I", "log path: " + sLogPath);
+
+            // 备用路径: /sdcard/
+            sExtPath = "/sdcard/kiosk_update.log";
+            try {
+                File extFile = new File(sExtPath);
+                if (extFile.exists() && extFile.length() > 500 * 1024) {
+                    extFile.delete();
+                }
+            } catch (Exception ignored) {}
+
+            String initMsg = "UpdateLog init: primary=" + sPrimaryPath + ", ext=" + sExtPath;
+            Log.i(TAG, initMsg);
+            writeRaw(sPrimaryPath, "I", initMsg);
         } catch (Exception e) {
             Log.e(TAG, "UpdateLog init failed", e);
         }
@@ -46,17 +58,33 @@ public class UpdateLog {
     private static synchronized void write(String level, String msg) {
         String ts = SDF.format(new Date());
         String line = ts + " [" + level + "] " + msg;
+        // 始终输出到 logcat
         Log.d(TAG, msg);
-        if (sLogPath == null) {
-            Log.w(TAG, "UpdateLog not initialized, log not written to file: " + msg);
-            return;
+
+        // 写入主路径
+        if (sPrimaryPath != null) {
+            writeRaw(sPrimaryPath, null, line + "\n");
         }
+
+        // 尝试写入 /sdcard/
+        if (sExtPath != null) {
+            writeRaw(sExtPath, null, line + "\n");
+        }
+    }
+
+    /** 底层写入，不依赖 level/time 格式化 */
+    private static void writeRaw(String path, String level, String content) {
         try {
-            FileWriter fw = new FileWriter(sLogPath, true);
-            fw.write(line + "\n");
+            FileWriter fw = new FileWriter(path, true);
+            if (level != null) {
+                String ts = SDF.format(new Date());
+                fw.write(ts + " [" + level + "] " + content + "\n");
+            } else {
+                fw.write(content);
+            }
             fw.close();
-        } catch (Exception e) {
-            Log.e(TAG, "Write log file failed: " + sLogPath, e);
+        } catch (Exception ignore) {
+            // 写入失败不崩溃
         }
     }
 
@@ -73,7 +101,6 @@ public class UpdateLog {
         write("E", msg + "\n" + sw.toString());
     }
 
-    public static String getLogPath() {
-        return sLogPath;
-    }
+    public static String getPrimaryPath() { return sPrimaryPath; }
+    public static String getExtPath() { return sExtPath; }
 }
