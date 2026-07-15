@@ -28,7 +28,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.13";
+    private static final String APP_VERSION = "1.0.14";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -463,10 +463,13 @@ public class MainActivity extends Activity {
             @Override
             public void onBeforeInstall() {
                 // 退出 lockTaskMode，让系统能正常替换 APK
+                // 注意：不要调用 finish()，否则 Activity 销毁后
+                // PackageInstaller session 可能无法正常工作
                 try {
                     MainActivity.this.stopLockTask();
                 } catch (Exception ignored) {}
-                MainActivity.this.finish();
+                // 移到后台，避免用户误操作
+                MainActivity.this.moveTaskToBack(true);
             }
 
             @Override

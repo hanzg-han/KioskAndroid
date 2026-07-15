@@ -203,11 +203,13 @@ public class UpdateHelper {
      * 静默安装 APK（Device Owner 权限）
      */
     private static void installApk(Context context, File apkFile, UpdateCallback callback) {
+        // 使用 ApplicationContext 确保在 Activity 销毁后仍可正常工作
+        Context appCtx = context.getApplicationContext();
         try {
-            PackageInstaller installer = context.getPackageManager().getPackageInstaller();
+            PackageInstaller installer = appCtx.getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
                     PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-            params.setAppPackageName(context.getPackageName());
+            params.setAppPackageName(appCtx.getPackageName());
 
             int sessionId = installer.createSession(params);
             PackageInstaller.Session session = installer.openSession(sessionId);
@@ -224,9 +226,9 @@ public class UpdateHelper {
             }
 
             // 提交安装，安装完成后通过广播通知 UpdateResultReceiver 重启 App
-            Intent intent = new Intent(context, UpdateResultReceiver.class);
+            Intent intent = new Intent(appCtx, UpdateResultReceiver.class);
             PendingIntent pending = PendingIntent.getBroadcast(
-                    context, 0, intent,
+                    appCtx, 0, intent,
                     PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             session.commit(pending.getIntentSender());
