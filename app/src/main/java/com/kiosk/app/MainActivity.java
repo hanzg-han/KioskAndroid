@@ -1,6 +1,7 @@
 package com.kiosk.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.TimePickerDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
@@ -9,12 +10,14 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.TimePicker;
 import android.widget.Toast;
@@ -25,7 +28,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.8";
+    private static final String APP_VERSION = "1.0.9";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -174,6 +177,18 @@ public class MainActivity extends Activity {
             updateScheduleDisplay();
             Toast.makeText(this, "定时已清除", Toast.LENGTH_SHORT).show();
         });
+
+        // ========== 自更新 ==========
+        final TextView tvUpdateInfo = findViewById(R.id.tv_update_info);
+        updateDisplay(tvUpdateInfo);
+
+        // 配置更新服务器地址
+        Button btnUpdateConfig = findViewById(R.id.btn_update_config);
+        btnUpdateConfig.setOnClickListener(v -> showUpdateConfigDialog(tvUpdateInfo));
+
+        // 检查更新
+        Button btnCheckUpdate = findViewById(R.id.btn_check_update);
+        btnCheckUpdate.setOnClickListener(v -> doCheckUpdate(tvUpdateInfo));
     }
 
     @Override
@@ -371,5 +386,90 @@ public class MainActivity extends Activity {
                 ScreenControlHelper.getScreenOnMinute(this));
 
         mTvScheduleInfo.setText("息屏: " + off + " | 亮屏: " + on);
+    }
+
+    // ========== 自更新 ==========
+
+    private void updateDisplay(TextView tv) {
+        String url = UpdateHelper.getServerUrl(this);
+        if (url.isEmpty()) {
+            tv.setText("更新: 未配置");
+        } else {
+            tv.setText("更新: " + url + "\n当前: v" + APP_VERSION);
+        }
+    }
+
+    /**
+     * 显示配置对话框
+     */
+    private void showUpdateConfigDialog(TextView tvUpdateInfo) {
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        input.setHint("http://192.168.1.100:8080");
+        input.setText(UpdateHelper.getServerUrl(this));
+
+        new AlertDialog.Builder(this)
+                .setTitle("配置更新服务器地址")
+                .setMessage("设置内网服务器地址，App 将检查\n{地址}/version.json 获取最新版本")
+                .setView(input)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String url = input.getText().toString().trim();
+                    UpdateHelper.setServerUrl(this, url);
+                    updateDisplay(tvUpdateInfo);
+                    Toast.makeText(this, url.isEmpty() ? "已清除" : "已保存: " + url,
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 执行更新检查
+     */
+    private void doCheckUpdate(TextView tvUpdateInfo) {
+        UpdateHelper.checkForUpdate(this, new UpdateHelper.UpdateCallback() {
+            @Override
+            public void onCheckStart() {
+                Toast.makeText(MainActivity.this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNoUpdate() {
+                Toast.makeText(MainActivity.this, "已是最新版本", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onUpdateFound(String version, long fileSize) {
+                String sizeStr = fileSize > 0 ? String.format(" (%.1f MB)", fileSize / 1048576.0) : "";
+                Toast.makeText(MainActivity.this,
+                        "发现新版本 v" + version + sizeStr + "，开始下载...",
+                        Toast.LENGTH_LONG).show();
+            }
+
+            @Override
+            public void onDownloadProgress(int percent) {
+                if (percent % 20 == 0 || percent >= 100) {
+                    Toast.makeText(MainActivity.this,
+                            "下载中 " + percent + "%", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onInstalling() {
+                Toast.makeText(MainActivity.this, "正在安装，即将重启...",
+                        Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onInstallSuccess() {
+                // PackageInstaller 提交成功，系统将重启 App
+            }
+
+            @Override
+            public void onError(String message) {
+                Toast.makeText(MainActivity.this, "更新失败: " + message,
+                        Toast.LENGTH_LONG).show();
+            }
+        });
     }
 }
