@@ -25,7 +25,7 @@ import java.net.URL;
  * - 通过 PackageInstaller 静默安装（Device Owner 权限）
  *
  * version.json 格式：
- * { "versionName": "1.0.13", "downloadUrl": "http://192.168.1.100:8080/app-release.apk" }
+ * { "versionCode": 17, "versionName": "1.0.17", "downloadUrl": "http://192.168.1.100:8080/app-release.apk" }
  */
 public class UpdateHelper {
 
@@ -105,21 +105,25 @@ public class UpdateHelper {
                 UpdateLog.i("version.json content: " + json);
 
                 JSONObject obj = new JSONObject(json);
-                String remoteVersion = obj.getString("versionName");
+                String remoteVersionName = obj.getString("versionName");
+                int remoteVersionCode = obj.optInt("versionCode", 0);
                 String downloadUrl = obj.getString("downloadUrl");
                 long fileSize = obj.optLong("fileSize", 0);
 
-                String currentVersion = getAppVersion(context);
-                UpdateLog.i("current: " + currentVersion + ", remote: " + remoteVersion);
+                String currentVersionName = getAppVersionName(context);
+                int currentVersionCode = getAppVersionCode(context);
+                UpdateLog.i("current: v" + currentVersionName + "(" + currentVersionCode + "), " +
+                            "remote: v" + remoteVersionName + "(" + remoteVersionCode + ")");
 
-                if (remoteVersion.equals(currentVersion)) {
-                    UpdateLog.i("same version, no update");
+                if (remoteVersionCode <= currentVersionCode) {
+                    UpdateLog.i("remote versionCode " + remoteVersionCode + " <= current " +
+                                currentVersionCode + ", no update (or downgrade)");
                     runOnUi(callback, () -> callback.onNoUpdate());
                     return;
                 }
 
                 UpdateLog.i("update found, downloadUrl: " + downloadUrl + ", fileSize: " + fileSize);
-                runOnUi(callback, () -> callback.onUpdateFound(remoteVersion, fileSize));
+                runOnUi(callback, () -> callback.onUpdateFound(remoteVersionName, fileSize));
 
                 // 下载 APK
                 File apkFile = downloadApk(context, downloadUrl, fileSize, callback);
@@ -288,12 +292,21 @@ public class UpdateHelper {
 
     // ========== 工具方法 ==========
 
-    private static String getAppVersion(Context ctx) {
+    private static String getAppVersionName(Context ctx) {
         try {
             return ctx.getPackageManager()
                     .getPackageInfo(ctx.getPackageName(), 0).versionName;
         } catch (Exception e) {
             return "0.0.0";
+        }
+    }
+
+    private static int getAppVersionCode(Context ctx) {
+        try {
+            return (int) ctx.getPackageManager()
+                    .getPackageInfo(ctx.getPackageName(), 0).getLongVersionCode();
+        } catch (Exception e) {
+            return 0;
         }
     }
 
