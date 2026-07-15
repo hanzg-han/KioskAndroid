@@ -6,6 +6,15 @@ android {
     namespace = "com.kiosk.app"
     compileSdk = 33
 
+    signingConfigs {
+        create("kiosk") {
+            storeFile = file("../kiosk.keystore")
+            storePassword = "kiosk123"
+            keyAlias = "kiosk"
+            keyPassword = "kiosk123"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.kiosk.app"
         minSdk = 30
@@ -15,7 +24,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("kiosk")
+        }
         release {
+            signingConfig = signingConfigs.getByName("kiosk")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
