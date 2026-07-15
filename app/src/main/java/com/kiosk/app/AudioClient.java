@@ -28,8 +28,13 @@ public class AudioClient {
     private Thread mRecvThread;
     /** 单线程调度器，保证音频帧按序处理，避免主线程积压导致帧合并 */
     private ExecutorService mDispatchExecutor;
+    /** 帧计数器（用于调试日志） */
+    private long mFrameCount = 0;
+    /** 上次打印统计日志的时间 */
+    private long mLastStatTime = 0;
 
     private static final int RECONNECT_DELAY_MS = 3000;
+    private static final int STAT_INTERVAL_MS = 5000; // 每5秒输出一次帧率统计
 
     public AudioClient(String host, int port, AiuiProtocol.AudioCallback callback) {
         this.mHost = host;
@@ -123,6 +128,16 @@ public class AudioClient {
                 if (tail == AiuiProtocol.FRAME_TAIL) {
                     AiuiProtocol.AudioFrame frame = AiuiProtocol.parseAudioFrame(data);
                     if (frame != null) {
+                        mFrameCount++;
+                        long now = System.currentTimeMillis();
+                        if (mLastStatTime == 0) mLastStatTime = now;
+                        // 每5秒打印帧率统计
+                        if (now - mLastStatTime >= STAT_INTERVAL_MS) {
+                            float fps = mFrameCount * 1000f / (now - mLastStatTime);
+                            UpdateLog.i(String.format("AudioRecv: totalFrames=%d fps=%.1f engineIdx=%d pcmLen=%d",
+                                    mFrameCount, fps, frame.engineIndex, frame.pcmData.length));
+                            mLastStatTime = now;
+                        }
                         dispatchAudioFrame(frame);
                     }
                 }
@@ -157,7 +172,10 @@ public class AudioClient {
     }
 
     private void dispatchAudioFrame(final AiuiProtocol.AudioFrame frame) {
-        if (mDispatchExecutor == null || mDispatchExecutor.isShutdown()) return;
+        if (mDispatchExecutor == null || mDispatchExecutor.isShutdown()) {
+            UpdateLog.e("AudioClient: dispatch SKIP - executor null or shutdown");
+            return;
+        }
         mDispatchExecutor.execute(() -> {
             if (mCallback != null) {
                 mCallback.onAudioFrame(frame.vadStatus, frame.engineIndex,

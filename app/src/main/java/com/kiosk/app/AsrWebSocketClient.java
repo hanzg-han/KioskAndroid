@@ -73,8 +73,13 @@ public class AsrWebSocketClient {
     // ========== 连接管理 ==========
 
     public void connect() {
-        if (mRunning.get()) return;
+        if (mRunning.get()) {
+            UpdateLog.i("AsrWS: connect() called but already running (mRunning=true)");
+            return;
+        }
+        UpdateLog.i("AsrWS: connect() starting...");
         mRunning.set(true);
+        mFirstFrameLogged = false;
 
         mReconnectThread = new Thread(() -> {
             while (mRunning.get()) {
@@ -197,6 +202,7 @@ public class AsrWebSocketClient {
     }
 
     public void disconnect() {
+        UpdateLog.i("AsrWS: disconnect() called, wasRunning=" + mRunning.get());
         mRunning.set(false);
         mReady.set(false);
         mConnected.set(false);
@@ -212,17 +218,41 @@ public class AsrWebSocketClient {
 
     // ========== 音频发送 ==========
 
+    /** ASR 发送统计（调试用） */
+    private long mWsSentCount = 0;
+    private long mWsDropNotReady = 0;
+    private long mWsLastStatTime = 0;
+    private boolean mFirstFrameLogged = false;
+    private static final int WS_STAT_INTERVAL_MS = 10000;
+
     /**
      * 发送 PCM int16 音频数据，内部转换为 float32
      * @param pcmInt16 PCM int16 格式原始字节
      */
     public void sendAudio(byte[] pcmInt16) {
         if (!mReady.get() || mWebSocket == null || pcmInt16 == null || pcmInt16.length == 0) {
+            if (!mReady.get()) mWsDropNotReady++;
             return;
         }
         try {
             byte[] float32Data = convertInt16ToFloat32(pcmInt16);
             mWebSocket.send(ByteString.of(float32Data));
+            mWsSentCount++;
+            if (!mFirstFrameLogged) {
+                mFirstFrameLogged = true;
+                UpdateLog.i(String.format("AsrWS: FIRST frame sent! pcm=%d float32=%d",
+                        pcmInt16.length, float32Data.length));
+            }
+            // 每10秒输出发送统计
+            long now = System.currentTimeMillis();
+            if (mWsLastStatTime == 0) mWsLastStatTime = now;
+            if (now - mWsLastStatTime >= WS_STAT_INTERVAL_MS) {
+                UpdateLog.i(String.format("AsrWS send: sent=%d dropNotReady=%d ready=%s",
+                        mWsSentCount, mWsDropNotReady, mReady.get()));
+                mWsLastStatTime = now;
+                mWsSentCount = 0;
+                mWsDropNotReady = 0;
+            }
         } catch (Exception e) {
             UpdateLog.e("AsrWS: sendAudio error", e);
         }
@@ -260,6 +290,7 @@ public class AsrWebSocketClient {
             if ("ready".equals(status)) {
                 // 握手成功
                 mReady.set(true);
+                mFirstFrameLogged = false;
                 UpdateLog.i("AsrWS: handshake OK, ready to send audio");
                 mHandler.post(() -> {
                     notifyConnectionState(true);

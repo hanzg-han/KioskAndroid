@@ -36,6 +36,14 @@ public class SpeechManager {
     // Qwen3-ASR 累积的完整文本（去重拼接）
     private final StringBuilder mAsrFullText = new StringBuilder();
 
+    /** ASR 音频发送统计（调试用） */
+    private long mSendCount = 0;
+    private long mSkipNoWakeup = 0;
+    private long mSkipOtherEngine = 0;
+    private long mLastSendStatTime = 0;
+    private boolean mFirstAudioLogged = false;
+    private static final int SEND_STAT_INTERVAL_MS = 10000; // 每10秒输出发送统计
+
     public interface SpeechCallback {
         void onWakeup();
         void onSleep();
@@ -87,6 +95,11 @@ public class SpeechManager {
         mAudioClient = new AudioClient(new AiuiProtocol.AudioCallback() {
             @Override
             public void onAudioFrame(int vadStatus, int engineIndex, int frameIndex, byte[] pcmData) {
+                if (!mFirstAudioLogged) {
+                    mFirstAudioLogged = true;
+                    UpdateLog.i(String.format("SpeechManager: FIRST audio frame! engineIdx=%d vad=%d pcmLen=%d wakeup=%s",
+                            engineIndex, vadStatus, pcmData != null ? pcmData.length : 0, mIsWakeup));
+                }
                 if (engineIndex == 99) { // 盒子内部送给 AIUI 的音频
                     mVadStatus = vadStatus;
                     mHandler.post(() -> {
@@ -94,8 +107,25 @@ public class SpeechManager {
                     });
                     // 只在唤醒状态下才发送音频到 Qwen3-ASR，避免跨会话音频合并
                     if (mIsWakeup && mAsrWsClient != null && pcmData != null && pcmData.length > 0) {
+                        mSendCount++;
                         mAsrWsClient.sendAudio(pcmData);
+                    } else if (!mIsWakeup) {
+                        mSkipNoWakeup++;
                     }
+                    // 每10秒输出发送统计
+                    long now = System.currentTimeMillis();
+                    if (mLastSendStatTime == 0) mLastSendStatTime = now;
+                    if (now - mLastSendStatTime >= SEND_STAT_INTERVAL_MS) {
+                        float sendRate = mSendCount * 1000f / (now - mLastSendStatTime);
+                        UpdateLog.i(String.format("AudioSend: sent=%d skipNoWake=%d skipEngine=%d rate=%.1f/s wakeup=%s",
+                                mSendCount, mSkipNoWakeup, mSkipOtherEngine, sendRate, mIsWakeup));
+                        mLastSendStatTime = now;
+                        mSendCount = 0;
+                        mSkipNoWakeup = 0;
+                        mSkipOtherEngine = 0;
+                    }
+                } else {
+                    mSkipOtherEngine++;
                 }
             }
 
@@ -246,6 +276,7 @@ public class SpeechManager {
                     mAsrFullText.setLength(0);  // 清空 Qwen3-ASR 累积文本
                     mLastFinalIat = "";
                     // 重新连接 ASR，开始全新会话
+                    UpdateLog.i("SpeechManager: WAKEUP -> reconnect AsrWS");
                     if (mAsrWsClient != null) mAsrWsClient.connect();
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onWakeup();
@@ -255,6 +286,7 @@ public class SpeechManager {
                 case "5":
                     mIsWakeup = false;
                     // 休眠前 flush 剩余音频并断开 ASR，确保会话边界
+                    UpdateLog.i("SpeechManager: SLEEP -> flush+disconnect AsrWS");
                     if (mAsrWsClient != null) {
                         mAsrWsClient.flush();
                         mAsrWsClient.disconnect();
