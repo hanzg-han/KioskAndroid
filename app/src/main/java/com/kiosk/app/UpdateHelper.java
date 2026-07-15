@@ -25,7 +25,7 @@ import java.net.URL;
  * - 通过 PackageInstaller 静默安装（Device Owner 权限）
  *
  * version.json 格式：
- * { "versionName": "1.0.10", "downloadUrl": "http://192.168.1.100:8080/app-release.apk" }
+ * { "versionName": "1.0.11", "downloadUrl": "http://192.168.1.100:8080/app-release.apk" }
  */
 public class UpdateHelper {
 
