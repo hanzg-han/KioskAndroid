@@ -19,7 +19,8 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Kiosk">
+        android:theme="@style/Theme.Kiosk"
+        android:usesCleartextTraffic="true">
 
         <!-- 设备管理器 -->
         <receiver
