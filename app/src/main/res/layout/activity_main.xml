@@ -32,6 +32,65 @@
             android:lineSpacingExtra="8dp" />
     </FrameLayout>
 
+    <!-- 定时控制栏 -->
+    <LinearLayout
+        android:id="@+id/schedule_bar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="#F0F0F0"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:id="@+id/tv_schedule_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="息屏: 未设置 | 亮屏: 未设置"
+            android:textColor="#666666"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_set_screen_off"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:background="#CCCCCC"
+            android:minWidth="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text="息屏"
+            android:textColor="#333333"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_set_screen_on"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:background="#CCCCCC"
+            android:layout_marginStart="4dp"
+            android:minWidth="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text="亮屏"
+            android:textColor="#333333"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_clear_schedule"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginStart="4dp"
+            android:background="#E57373"
+            android:minWidth="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text="清除"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- 底部导航栏 -->
     <LinearLayout
         android:id="@+id/nav_bar"

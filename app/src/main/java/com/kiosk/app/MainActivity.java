@@ -1,6 +1,7 @@
 package com.kiosk.app;
 
 import android.app.Activity;
+import android.app.TimePickerDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -14,6 +15,8 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.Button;
+import android.widget.TextView;
+import android.widget.TimePicker;
 import android.widget.Toast;
 
 /**
@@ -22,7 +25,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.7";
+    private static final String APP_VERSION = "1.0.8";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -35,6 +38,7 @@ public class MainActivity extends Activity {
     private int mExitClickCount = 0;
     private long mExitLastClickTime = 0;
     private boolean mSystemBarsHidden = true; // 默认隐藏系统导航栏
+    private TextView mTvScheduleInfo; // 定时状态显示
 
     private final Runnable mKeepFullscreenTask = new Runnable() {
         @Override
@@ -149,6 +153,27 @@ public class MainActivity extends Activity {
                 }
             }
         });
+
+        // ========== 定时息屏/亮屏 ==========
+        mTvScheduleInfo = findViewById(R.id.tv_schedule_info);
+        updateScheduleDisplay();
+
+        // 设置息屏时间
+        Button btnScreenOff = findViewById(R.id.btn_set_screen_off);
+        btnScreenOff.setOnClickListener(v -> showTimePicker(true));
+
+        // 设置亮屏时间
+        Button btnScreenOn = findViewById(R.id.btn_set_screen_on);
+        btnScreenOn.setOnClickListener(v -> showTimePicker(false));
+
+        // 清除定时
+        Button btnClear = findViewById(R.id.btn_clear_schedule);
+        btnClear.setOnClickListener(v -> {
+            ScreenControlHelper.clearScreenOffTime(this);
+            ScreenControlHelper.clearScreenOnTime(this);
+            updateScheduleDisplay();
+            Toast.makeText(this, "定时已清除", Toast.LENGTH_SHORT).show();
+        });
     }
 
     @Override
@@ -158,6 +183,7 @@ public class MainActivity extends Activity {
         if (mSystemBarsHidden) {
             hideSystemUI();  // 内部会调用 enterLockTask()
         }
+        updateScheduleDisplay();
         mHandler.postDelayed(mKeepFullscreenTask, 500);
     }
 
@@ -283,5 +309,67 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         // Kiosk 模式：禁用返回键
+    }
+
+    // ========== 定时息屏/亮屏 ==========
+
+    /**
+     * 显示时间选择器
+     * @param isScreenOff true=息屏时间, false=亮屏时间
+     */
+    private void showTimePicker(boolean isScreenOff) {
+        String title = isScreenOff ? "设置息屏时间" : "设置亮屏时间";
+        int defaultHour = isScreenOff
+                ? ScreenControlHelper.getScreenOffHour(this)
+                : ScreenControlHelper.getScreenOnHour(this);
+        int defaultMinute = isScreenOff
+                ? ScreenControlHelper.getScreenOffMinute(this)
+                : ScreenControlHelper.getScreenOnMinute(this);
+
+        // 默认值处理
+        if (defaultHour == ScreenControlHelper.NOT_SET) {
+            defaultHour = isScreenOff ? 22 : 6;  // 息屏默认 22:00, 亮屏默认 06:00
+            defaultMinute = 0;
+        }
+
+        TimePickerDialog dialog = new TimePickerDialog(
+                this,
+                (TimePicker view, int hourOfDay, int minute) -> {
+                    onTimeSet(isScreenOff, hourOfDay, minute);
+                },
+                defaultHour, defaultMinute, true); // true = 24小时制
+        dialog.setTitle(title);
+        dialog.show();
+    }
+
+    /**
+     * 时间选择回调
+     */
+    private void onTimeSet(boolean isScreenOff, int hour, int minute) {
+        if (isScreenOff) {
+            ScreenControlHelper.saveScreenOffTime(this, hour, minute);
+        } else {
+            ScreenControlHelper.saveScreenOnTime(this, hour, minute);
+        }
+        updateScheduleDisplay();
+        String label = isScreenOff ? "息屏" : "亮屏";
+        Toast.makeText(this, label + "时间已设为 " + String.format("%02d:%02d", hour, minute),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 更新定时状态显示
+     */
+    private void updateScheduleDisplay() {
+        if (mTvScheduleInfo == null) return;
+
+        String off = ScreenControlHelper.formatTime(
+                ScreenControlHelper.getScreenOffHour(this),
+                ScreenControlHelper.getScreenOffMinute(this));
+        String on = ScreenControlHelper.formatTime(
+                ScreenControlHelper.getScreenOnHour(this),
+                ScreenControlHelper.getScreenOnMinute(this));
+
+        mTvScheduleInfo.setText("息屏: " + off + " | 亮屏: " + on);
     }
 }

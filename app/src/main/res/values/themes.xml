@@ -13,6 +13,14 @@
         <item name="android:windowTranslucentNavigation">true</item>
     </style>
 
+    <!-- 透明主题（定时亮屏 Activity 使用） -->
+    <style name="Theme.Kiosk.Transparent" parent="Theme.Kiosk">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
     <!-- 底部导航按钮样式 -->
     <style name="NavButton">
         <item name="android:layout_width">0dp</item>
