@@ -37,7 +37,7 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.24";
+    private static final String APP_VERSION = "1.0.25";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -46,8 +46,6 @@ public class MainActivity extends Activity {
     private DevicePolicyManager mDpm;
     private ComponentName mAdminComponent;
     private Button mBtnNavBar;
-    private int mExitClickCount = 0;
-    private long mExitLastClickTime = 0;
     private boolean mSystemBarsHidden = true; // 默认隐藏系统导航栏
     private TextView mTvScheduleInfo; // 定时状态显示
 
@@ -234,27 +232,13 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 退出（连点 5 次才能退出，防止误触）
+        // 退出按钮：单击退出
         Button btnExit = findViewById(R.id.btn_exit);
-        btnExit.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                long now = System.currentTimeMillis();
-                if (now - mExitLastClickTime > 3000) {
-                    mExitClickCount = 0;
-                }
-                mExitLastClickTime = now;
-                mExitClickCount++;
-
-                int remain = 5 - mExitClickCount;
-                if (remain > 0) {
-                    Toast.makeText(MainActivity.this,
-                            "再点击 " + remain + " 次退出 Kiosk 模式",
-                            Toast.LENGTH_SHORT).show();
-                } else {
-                    finishAffinity();
-                }
+        btnExit.setOnClickListener(v -> {
+            if (mSpeechManager != null) {
+                mSpeechManager.disconnect();
             }
+            finishAffinity();
         });
 
         // ========== 定时息屏/亮屏 ==========

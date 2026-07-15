@@ -186,7 +186,6 @@ public class SpeechManager {
         notifyLog("系统", "开始连接: 音频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.AUDIO_PORT);
         notifyLog("系统", "开始连接: 视频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.VIDEO_PORT);
         notifyLog("系统", "开始连接: QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
-        notifyLog("系统", "开始连接: QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
         if (mUartClient != null) mUartClient.connect();
         if (mAudioClient != null) mAudioClient.connect();
         if (mVideoClient != null) mVideoClient.connect();

@@ -45,7 +45,9 @@ public class AsrWebSocketClient {
     private WebSocket mWebSocket;
     private final AtomicBoolean mRunning = new AtomicBoolean(false);
     private final AtomicBoolean mReady = new AtomicBoolean(false);
+    private final AtomicBoolean mConnected = new AtomicBoolean(false);
     private Thread mReconnectThread;
+    private final Object mDisconnectLock = new Object();
 
     public interface AsrCallback {
         /** 收到识别结果文本 */
@@ -132,14 +134,24 @@ public class AsrWebSocketClient {
                         public void onClosed(WebSocket webSocket, int code, String reason) {
                             UpdateLog.i("AsrWS: closed, code=" + code + " reason=" + reason);
                             mReady.set(false);
+                            mConnected.set(false);
                             notifyConnectionState(false);
+                            // 唤醒重连线程
+                            synchronized (mDisconnectLock) {
+                                mDisconnectLock.notifyAll();
+                            }
                         }
 
                         @Override
                         public void onFailure(WebSocket webSocket, Throwable t, Response response) {
                             UpdateLog.e("AsrWS: failure", t);
                             mReady.set(false);
+                            mConnected.set(false);
                             notifyConnectionState(false);
+                            // 唤醒重连线程
+                            synchronized (mDisconnectLock) {
+                                mDisconnectLock.notifyAll();
+                            }
                             synchronized (lock) {
                                 lock.notifyAll();
                             }
@@ -162,12 +174,15 @@ public class AsrWebSocketClient {
                         continue;
                     }
 
-                    // 连接成功，阻塞直到 mRunning 变为 false
-                    while (mRunning.get()) {
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            break;
+                    // 连接成功，等待断开信号后再重连
+                    mConnected.set(true);
+                    synchronized (mDisconnectLock) {
+                        while (mRunning.get() && mConnected.get()) {
+                            try {
+                                mDisconnectLock.wait();
+                            } catch (InterruptedException e) {
+                                break;
+                            }
                         }
                     }
 
@@ -184,7 +199,12 @@ public class AsrWebSocketClient {
     public void disconnect() {
         mRunning.set(false);
         mReady.set(false);
+        mConnected.set(false);
         closeWebSocket();
+        // 唤醒重连线程使其退出
+        synchronized (mDisconnectLock) {
+            mDisconnectLock.notifyAll();
+        }
         if (mReconnectThread != null) {
             mReconnectThread.interrupt();
         }
