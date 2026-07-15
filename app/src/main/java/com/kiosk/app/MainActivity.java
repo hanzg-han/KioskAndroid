@@ -6,6 +6,7 @@ import android.app.TimePickerDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,7 +16,6 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -28,7 +28,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.21";
+    private static final String APP_VERSION = "1.0.22";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -36,12 +36,18 @@ public class MainActivity extends Activity {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private DevicePolicyManager mDpm;
     private ComponentName mAdminComponent;
-    private WebView mWebView;
     private Button mBtnNavBar;
     private int mExitClickCount = 0;
     private long mExitLastClickTime = 0;
     private boolean mSystemBarsHidden = true; // 默认隐藏系统导航栏
     private TextView mTvScheduleInfo; // 定时状态显示
+
+    // 语音识别相关
+    private TextView mTvAsrStatus;
+    private TextView mTvAsrText;
+    private TextView mTvNlpText;
+    private Button mBtnWakeup;
+    private SpeechManager mSpeechManager;
 
     private final Runnable mKeepFullscreenTask = new Runnable() {
         @Override
@@ -63,61 +69,89 @@ public class MainActivity extends Activity {
 
         setupLockTaskPackages();
         hideSystemUI();
-        showVersion();
+        initSpeechRecognition();
         setupNavButtons();
     }
 
     /**
-     * 在页面显示版本号
+     * 初始化语音识别
      */
-    private void showVersion() {
-        android.widget.TextView tvStatus = findViewById(R.id.tv_status);
-        if (tvStatus != null) {
-            tvStatus.setText("Kiosk 模式已启动\n状态栏下拉已禁用\n版本: " + APP_VERSION);
-        }
+    private void initSpeechRecognition() {
+        mTvAsrStatus = findViewById(R.id.tv_asr_status);
+        mTvAsrText = findViewById(R.id.tv_asr_text);
+        mTvNlpText = findViewById(R.id.tv_nlp_text);
+        mBtnWakeup = findViewById(R.id.btn_wakeup);
+
+        mTvAsrStatus.setText("语音识别就绪 | v" + APP_VERSION);
+
+        mBtnWakeup.setOnClickListener(v -> {
+            if (mSpeechManager != null) {
+                mSpeechManager.wakeup();
+                Toast.makeText(this, "已发送唤醒命令", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        mSpeechManager = SpeechManager.getInstance();
+        mSpeechManager.init(new SpeechManager.SpeechCallback() {
+            @Override
+            public void onWakeup() {
+                mTvAsrStatus.setText("已唤醒 | 请说话...");
+                mTvAsrStatus.setTextColor(Color.parseColor("#4CAF50"));
+                mTvAsrText.setText("");
+                mTvNlpText.setText("");
+            }
+
+            @Override
+            public void onSleep() {
+                mTvAsrStatus.setText("已休眠");
+                mTvAsrStatus.setTextColor(Color.parseColor("#999999"));
+            }
+
+            @Override
+            public void onIatResult(String text, boolean isFinal) {
+                mTvAsrText.setText(text);
+                if (isFinal) {
+                    mTvAsrStatus.setText("识别完成");
+                    mTvAsrStatus.setTextColor(Color.parseColor("#1976D2"));
+                }
+            }
+
+            @Override
+            public void onNlpResult(String text) {
+                mTvNlpText.setText(text);
+            }
+
+            @Override
+            public void onVadChanged(int vadStatus) {
+                switch (vadStatus) {
+                    case AiuiProtocol.VAD_BOS:
+                        mTvAsrStatus.setText("检测到语音...");
+                        break;
+                    case AiuiProtocol.VAD_EOS:
+                        mTvAsrStatus.setText("语音结束，识别中...");
+                        break;
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                mTvAsrStatus.setText("错误: " + message);
+                mTvAsrStatus.setTextColor(Color.RED);
+            }
+        });
+
+        // 自动连接
+        mSpeechManager.connect();
+
+        UpdateLog.i("SpeechManager connected, ASR=" + AiuiProtocol.DEFAULT_ASR_IP +
+                    ", Audio=" + AiuiProtocol.DEFAULT_LOCAL_IP +
+                    ", Video=" + AiuiProtocol.DEFAULT_LOCAL_IP);
     }
 
     /**
      * 初始化底部导航按钮
      */
     private void setupNavButtons() {
-        mWebView = findViewById(R.id.webview);
-
-        // 返回
-        Button btnBack = findViewById(R.id.btn_back);
-        btnBack.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mWebView != null && mWebView.canGoBack()) {
-                    mWebView.goBack();
-                }
-            }
-        });
-
-        // 主页
-        Button btnHome = findViewById(R.id.btn_home);
-        btnHome.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mWebView != null && mWebView.getUrl() != null) {
-                    mWebView.reload();
-                }
-            }
-        });
-
-        // 刷新
-        Button btnRefresh = findViewById(R.id.btn_refresh);
-        btnRefresh.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mWebView != null && mWebView.getUrl() != null) {
-                    mWebView.reload();
-                } else {
-                    recreate();
-                }
-            }
-        });
-
         // 显示/隐藏系统导航栏
         mBtnNavBar = findViewById(R.id.btn_navbar);
         updateNavBarButtonText();
@@ -200,6 +234,14 @@ public class MainActivity extends Activity {
         }
         updateScheduleDisplay();
         mHandler.postDelayed(mKeepFullscreenTask, 500);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mSpeechManager != null) {
+            mSpeechManager.disconnect();
+        }
     }
 
     @Override
