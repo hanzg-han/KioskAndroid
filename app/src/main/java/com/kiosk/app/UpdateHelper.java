@@ -228,13 +228,14 @@ public class UpdateHelper {
             session.commit(pending.getIntentSender());
             session.close();
 
-            Log.d(TAG, "Install committed, app will restart");
+            Log.d(TAG, "Install committed, killing self to allow install");
 
             // 通知成功
             runOnUi(callback, () -> callback.onInstallSuccess());
 
-            // 删除 APK 文件
-            apkFile.deleteOnExit();
+            // 短暂延迟确保回调显示，然后主动杀进程让系统完成安装
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            android.os.Process.killProcess(android.os.Process.myPid());
 
         } catch (Exception e) {
             Log.e(TAG, "Install failed", e);
