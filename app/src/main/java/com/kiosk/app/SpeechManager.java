@@ -92,8 +92,8 @@ public class SpeechManager {
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onVadChanged(vadStatus);
                     });
-                    // 同时将 PCM 音频转发到 Qwen3-ASR WebSocket 进行识别
-                    if (mAsrWsClient != null && pcmData != null && pcmData.length > 0) {
+                    // 只在唤醒状态下才发送音频到 Qwen3-ASR，避免跨会话音频合并
+                    if (mIsWakeup && mAsrWsClient != null && pcmData != null && pcmData.length > 0) {
                         mAsrWsClient.sendAudio(pcmData);
                     }
                 }
@@ -245,6 +245,8 @@ public class SpeechManager {
                     mNlpResult = "";
                     mAsrFullText.setLength(0);  // 清空 Qwen3-ASR 累积文本
                     mLastFinalIat = "";
+                    // 重新连接 ASR，开始全新会话
+                    if (mAsrWsClient != null) mAsrWsClient.connect();
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onWakeup();
                     });
@@ -252,8 +254,11 @@ public class SpeechManager {
                 case "EVENT_SLEEP":
                 case "5":
                     mIsWakeup = false;
-                    // 休眠前 flush 剩余音频到 Qwen3-ASR
-                    if (mAsrWsClient != null) mAsrWsClient.flush();
+                    // 休眠前 flush 剩余音频并断开 ASR，确保会话边界
+                    if (mAsrWsClient != null) {
+                        mAsrWsClient.flush();
+                        mAsrWsClient.disconnect();
+                    }
                     mAsrFullText.setLength(0);
                     mLastFinalIat = mIatText;
                     mHandler.post(() -> {

@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -24,6 +26,8 @@ public class AudioClient {
     private Socket mSocket;
     private final AtomicBoolean mRunning = new AtomicBoolean(false);
     private Thread mRecvThread;
+    /** 单线程调度器，保证音频帧按序处理，避免主线程积压导致帧合并 */
+    private ExecutorService mDispatchExecutor;
 
     private static final int RECONNECT_DELAY_MS = 3000;
 
@@ -43,6 +47,11 @@ public class AudioClient {
     public void connect() {
         if (mRunning.get()) return;
         mRunning.set(true);
+        mDispatchExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "AudioClient-Dispatch");
+            t.setDaemon(true);
+            return t;
+        });
 
         mRecvThread = new Thread(() -> {
             while (mRunning.get()) {
@@ -71,6 +80,10 @@ public class AudioClient {
         mRunning.set(false);
         closeSocket();
         notifyConnection(false);
+        if (mDispatchExecutor != null) {
+            mDispatchExecutor.shutdownNow();
+            mDispatchExecutor = null;
+        }
     }
 
     // ========== 接收循环 ==========
@@ -144,7 +157,8 @@ public class AudioClient {
     }
 
     private void dispatchAudioFrame(final AiuiProtocol.AudioFrame frame) {
-        mHandler.post(() -> {
+        if (mDispatchExecutor == null || mDispatchExecutor.isShutdown()) return;
+        mDispatchExecutor.execute(() -> {
             if (mCallback != null) {
                 mCallback.onAudioFrame(frame.vadStatus, frame.engineIndex,
                         frame.frameIndex, frame.pcmData);

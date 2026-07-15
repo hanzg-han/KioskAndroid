@@ -37,7 +37,7 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.25";
+    private static final String APP_VERSION = "1.0.26";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -232,13 +232,15 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 退出按钮：单击退出
+        // 退出按钮：单击退出，完全终止进程
         Button btnExit = findViewById(R.id.btn_exit);
         btnExit.setOnClickListener(v -> {
             if (mSpeechManager != null) {
                 mSpeechManager.disconnect();
             }
             finishAffinity();
+            // 彻底杀掉进程，避免残留后台服务
+            android.os.Process.killProcess(android.os.Process.myPid());
         });
 
         // ========== 定时息屏/亮屏 ==========
