@@ -106,18 +106,15 @@ public class UpdateHelper {
 
                 JSONObject obj = new JSONObject(json);
                 String remoteVersionName = obj.getString("versionName");
-                int remoteVersionCode = obj.optInt("versionCode", 0);
                 String downloadUrl = obj.getString("downloadUrl");
                 long fileSize = obj.optLong("fileSize", 0);
 
                 String currentVersionName = getAppVersionName(context);
-                int currentVersionCode = getAppVersionCode(context);
-                UpdateLog.i("current: v" + currentVersionName + "(" + currentVersionCode + "), " +
-                            "remote: v" + remoteVersionName + "(" + remoteVersionCode + ")");
+                UpdateLog.i("current: v" + currentVersionName + ", remote: v" + remoteVersionName);
 
-                if (remoteVersionCode <= currentVersionCode) {
-                    UpdateLog.i("remote versionCode " + remoteVersionCode + " <= current " +
-                                currentVersionCode + ", no update (or downgrade)");
+                if (!isNewerVersion(currentVersionName, remoteVersionName)) {
+                    UpdateLog.i("remote version " + remoteVersionName + " not newer than current " +
+                                currentVersionName + ", no update");
                     runOnUi(callback, () -> callback.onNoUpdate());
                     return;
                 }
@@ -298,6 +295,28 @@ public class UpdateHelper {
                     .getPackageInfo(ctx.getPackageName(), 0).versionName;
         } catch (Exception e) {
             return "0.0.0";
+        }
+    }
+
+    /**
+     * 比较两个版本号字符串，判断 remote 是否比 current 更新
+     * 支持格式: major.minor.patch
+     */
+    private static boolean isNewerVersion(String current, String remote) {
+        try {
+            String[] cur = current.split("\\.");
+            String[] rem = remote.split("\\.");
+            int len = Math.max(cur.length, rem.length);
+            for (int i = 0; i < len; i++) {
+                int cv = i < cur.length ? Integer.parseInt(cur[i]) : 0;
+                int rv = i < rem.length ? Integer.parseInt(rem[i]) : 0;
+                if (rv > cv) return true;
+                if (rv < cv) return false;
+            }
+            return false; // 相同版本不需要更新
+        } catch (NumberFormatException e) {
+            UpdateLog.e("isNewerVersion parse failed", e);
+            return false;
         }
     }
 
