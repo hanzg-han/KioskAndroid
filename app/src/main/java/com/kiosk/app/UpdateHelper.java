@@ -44,6 +44,8 @@ public class UpdateHelper {
         void onNoUpdate();
         void onUpdateFound(String version, long fileSize);
         void onDownloadProgress(int percent);
+        /** 准备安装前调用，Activity 应在此退出 lockTaskMode 并 finish */
+        void onBeforeInstall();
         void onInstalling();
         void onInstallSuccess();
         void onError(String message);
@@ -116,6 +118,9 @@ public class UpdateHelper {
                     runOnUi(callback, () -> callback.onError("APK 下载失败"));
                     return;
                 }
+
+                // 让 Activity 退出 lockTaskMode 并关闭
+                runOnUiAndWait(callback, () -> callback.onBeforeInstall());
 
                 // 静默安装
                 runOnUi(callback, () -> callback.onInstalling());
@@ -232,6 +237,10 @@ public class UpdateHelper {
             // 通知 UI
             runOnUi(callback, () -> callback.onInstallSuccess());
 
+            // 短暂延迟后干净退出，让系统接管安装
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            System.exit(0);
+
         } catch (Exception e) {
             Log.e(TAG, "Install failed", e);
             runOnUi(callback, () -> callback.onError("安装失败: " + e.getMessage()));
@@ -260,6 +269,27 @@ public class UpdateHelper {
     private static void runOnUi(UpdateCallback callback, Runnable action) {
         if (callback != null) {
             new Handler(Looper.getMainLooper()).post(action);
+        }
+    }
+
+    /**
+     * 在主线程执行并等待完成
+     */
+    private static void runOnUiAndWait(UpdateCallback callback, Runnable action) {
+        if (callback == null) return;
+        final Object lock = new Object();
+        final boolean[] done = {false};
+        new Handler(Looper.getMainLooper()).post(() -> {
+            action.run();
+            synchronized (lock) {
+                done[0] = true;
+                lock.notify();
+            }
+        });
+        synchronized (lock) {
+            while (!done[0]) {
+                try { lock.wait(); } catch (InterruptedException e) { break; }
+            }
         }
     }
 }

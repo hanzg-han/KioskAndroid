@@ -461,6 +461,15 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void onBeforeInstall() {
+                // 退出 lockTaskMode，让系统能正常替换 APK
+                try {
+                    MainActivity.this.stopLockTask();
+                } catch (Exception ignored) {}
+                MainActivity.this.finish();
+            }
+
+            @Override
             public void onInstallSuccess() {
                 // PackageInstaller 提交成功，系统将重启 App
             }
