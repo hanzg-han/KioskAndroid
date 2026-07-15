@@ -74,15 +74,15 @@ public class AiuiProtocol {
     public static final int VAD_EOS = 3;
 
     // ========== 默认地址 ==========
-    /** ASR 服务器默认地址 */
+    /** Qwen3-ASR WebSocket 服务地址 (远程) */
     public static final String DEFAULT_ASR_IP = "192.168.0.119";
-    /** 视频/音频流默认使用本机 */
+    /** UART/音频/视频 TCP 服务均运行在本机 */
     public static final String DEFAULT_LOCAL_IP = "127.0.0.1";
-    /** UART 控制端口 */
+    /** UART 控制端口 (本地) */
     public static final int UART_PORT = 19199;
-    /** 音频流端口 */
+    /** 音频流端口 (本地) */
     public static final int AUDIO_PORT = 9080;
-    /** 视频流端口 */
+    /** 视频流端口 (本地) */
     public static final int VIDEO_PORT = 9090;
 
     // ========== 回调接口 ==========

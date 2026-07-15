@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * UART 通道 TCP 客户端
- * 连接 AIUI 引擎，收发控制命令和识别结果
- * 默认连接 192.168.0.119:19199
+ * 连接本地 AIUI 引擎，收发控制命令和识别结果
+ * 默认连接 127.0.0.1:19199
  */
 public class UartClient {
 
@@ -42,7 +42,7 @@ public class UartClient {
     }
 
     public UartClient(AiuiProtocol.UartCallback callback) {
-        this(AiuiProtocol.DEFAULT_ASR_IP, AiuiProtocol.UART_PORT, callback);
+        this(AiuiProtocol.DEFAULT_LOCAL_IP, AiuiProtocol.UART_PORT, callback);
     }
 
     // ========== 连接管理 ==========

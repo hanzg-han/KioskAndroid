@@ -8,7 +8,11 @@ import org.json.JSONObject;
 
 /**
  * 语音识别管理器
- * 整合 UART/Audio/Video 三个通道，处理 ASR/NLP 结果
+ * 整合 UART/Audio/Video/Qwen3-ASR 通道，处理 ASR/NLP 结果
+ * - UART: 唤醒/休眠/TTS 控制
+ * - Audio: 接收 PCM 音频流
+ * - Video: 接收视频流
+ * - AsrWebSocket: 将 PCM 音频发送到 Qwen3-ASR WebSocket 获取识别文本
  */
 public class SpeechManager {
 
@@ -17,20 +21,20 @@ public class SpeechManager {
     private UartClient mUartClient;
     private AudioClient mAudioClient;
     private VideoClient mVideoClient;
+    private AsrWebSocketClient mAsrWsClient;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private SpeechCallback mCallback;
 
     // 当前状态
     private volatile boolean mIsWakeup = false;
-    private volatile String mIatText = "";       // 当前识别文本
+    private volatile String mIatText = "";       // 当前识别文本 (来自 Qwen3-ASR)
     private volatile String mLastFinalIat = "";  // 上一次最终结果
     private volatile String mNlpResult = "";     // NLP 语义结果
     private volatile int mVadStatus = 0;
 
-    // IAT PGS 支持
-    private final String[] mIatPgsStack = new String[256];
-    private int mIatPgsIndex = 0;
+    // Qwen3-ASR 累积的完整文本（去重拼接）
+    private final StringBuilder mAsrFullText = new StringBuilder();
 
     public interface SpeechCallback {
         void onWakeup();
@@ -39,6 +43,10 @@ public class SpeechManager {
         void onNlpResult(String text);
         void onVadChanged(int vadStatus);
         void onError(String message);
+        /** 视频帧回调 */
+        void onVideoFrame(byte[] frameData);
+        /** 接口日志回调 */
+        void onLog(String tag, String message);
     }
 
     private SpeechManager() {}
@@ -62,12 +70,16 @@ public class SpeechManager {
 
             @Override
             public void onConnectionState(boolean connected) {
-                UpdateLog.i("SpeechManager: UART " + (connected ? "connected" : "disconnected"));
+                String msg = "UART " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.UART_PORT :
+                        "断开连接");
+                UpdateLog.i("SpeechManager: " + msg);
+                notifyLog("ASR", msg);
             }
 
             @Override
             public void onError(String message) {
                 notifyError("UART: " + message);
+                notifyLog("ASR", "错误: " + message);
             }
         });
 
@@ -80,17 +92,26 @@ public class SpeechManager {
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onVadChanged(vadStatus);
                     });
+                    // 同时将 PCM 音频转发到 Qwen3-ASR WebSocket 进行识别
+                    if (mAsrWsClient != null && pcmData != null && pcmData.length > 0) {
+                        mAsrWsClient.sendAudio(pcmData);
+                    }
                 }
             }
 
             @Override
             public void onConnectionState(boolean connected) {
-                UpdateLog.i("SpeechManager: Audio " + (connected ? "connected" : "disconnected"));
+                String msg = "Audio " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.AUDIO_PORT :
+                        "断开连接");
+                UpdateLog.i("SpeechManager: " + msg);
+                notifyLog("音频", msg);
             }
 
             @Override
             public void onError(String message) {
-                UpdateLog.e("SpeechManager: Audio error: " + message);
+                String msg = "Audio error: " + message;
+                UpdateLog.e("SpeechManager: " + msg);
+                notifyLog("音频", "错误: " + message);
             }
         });
 
@@ -98,17 +119,62 @@ public class SpeechManager {
         mVideoClient = new VideoClient(new AiuiProtocol.VideoCallback() {
             @Override
             public void onVideoFrame(int frameIndex, byte[] frameData) {
-                // 视频帧处理，后续可扩展显示
+                // 转发视频帧到上层显示
+                final byte[] data = frameData;
+                mHandler.post(() -> {
+                    if (mCallback != null) mCallback.onVideoFrame(data);
+                });
             }
 
             @Override
             public void onConnectionState(boolean connected) {
-                UpdateLog.i("SpeechManager: Video " + (connected ? "connected" : "disconnected"));
+                String msg = "Video " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.VIDEO_PORT :
+                        "断开连接");
+                UpdateLog.i("SpeechManager: " + msg);
+                notifyLog("视频", msg);
             }
 
             @Override
             public void onError(String message) {
-                UpdateLog.e("SpeechManager: Video error: " + message);
+                String msg = "Video error: " + message;
+                UpdateLog.e("SpeechManager: " + msg);
+                notifyLog("视频", "错误: " + message);
+            }
+        });
+
+        // Qwen3-ASR WebSocket 通道 (代替 UART 做语音识别)
+        mAsrWsClient = new AsrWebSocketClient(new AsrWebSocketClient.AsrCallback() {
+            @Override
+            public void onResult(String text, boolean isFinal) {
+                // Qwen3-ASR 返回增量文本，累积拼接
+                if (text != null && !text.isEmpty()) {
+                    mAsrFullText.append(text);
+                }
+                final String fullText = mAsrFullText.toString();
+                mIatText = fullText;
+                mHandler.post(() -> {
+                    if (mCallback != null) mCallback.onIatResult(fullText, isFinal);
+                });
+            }
+
+            @Override
+            public void onReady() {
+                UpdateLog.i("SpeechManager: Qwen3-ASR ready");
+                notifyLog("QwenASR", "服务就绪，可接收音频");
+            }
+
+            @Override
+            public void onConnectionState(boolean connected) {
+                String msg = "QwenASR " + (connected ? "已连接 " + AsrWebSocketClient.DEFAULT_ASR_WS_URL :
+                        "断开连接");
+                UpdateLog.i("SpeechManager: " + msg);
+                notifyLog("QwenASR", msg);
+            }
+
+            @Override
+            public void onError(String message) {
+                UpdateLog.e("SpeechManager: QwenASR error: " + message);
+                notifyLog("QwenASR", "错误: " + message);
             }
         });
 
@@ -116,12 +182,22 @@ public class SpeechManager {
     }
 
     public void connect() {
+        notifyLog("系统", "开始连接: UART=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.UART_PORT);
+        notifyLog("系统", "开始连接: 音频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.AUDIO_PORT);
+        notifyLog("系统", "开始连接: 视频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.VIDEO_PORT);
+        notifyLog("系统", "开始连接: QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
+        notifyLog("系统", "开始连接: QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
         if (mUartClient != null) mUartClient.connect();
         if (mAudioClient != null) mAudioClient.connect();
         if (mVideoClient != null) mVideoClient.connect();
+        if (mAsrWsClient != null) mAsrWsClient.connect();
     }
 
     public void disconnect() {
+        if (mAsrWsClient != null) {
+            mAsrWsClient.flush();
+            mAsrWsClient.disconnect();
+        }
         if (mUartClient != null) mUartClient.disconnect();
         if (mAudioClient != null) mAudioClient.disconnect();
         if (mVideoClient != null) mVideoClient.disconnect();
@@ -168,6 +244,8 @@ public class SpeechManager {
                     mIsWakeup = true;
                     mIatText = "";
                     mNlpResult = "";
+                    mAsrFullText.setLength(0);  // 清空 Qwen3-ASR 累积文本
+                    mLastFinalIat = "";
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onWakeup();
                     });
@@ -175,6 +253,10 @@ public class SpeechManager {
                 case "EVENT_SLEEP":
                 case "5":
                     mIsWakeup = false;
+                    // 休眠前 flush 剩余音频到 Qwen3-ASR
+                    if (mAsrWsClient != null) mAsrWsClient.flush();
+                    mAsrFullText.setLength(0);
+                    mLastFinalIat = mIatText;
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onSleep();
                     });
@@ -211,8 +293,6 @@ public class SpeechManager {
             JSONArray data = cObj.optJSONArray("data");
             if (data == null) return;
 
-            boolean hasNlp = false;
-
             for (int i = 0; i < data.length(); i++) {
                 JSONObject item = data.getJSONObject(i);
                 JSONObject params = item.optJSONObject("params");
@@ -220,91 +300,14 @@ public class SpeechManager {
 
                 String sub = params.optString("sub", "");
 
-                if ("iat".equals(sub)) {
-                    processIatResult(item);
-                } else if ("nlp".equals(sub) || "cbm_semantic".equals(sub)) {
-                    hasNlp = true;
+                // IAT 识别已由 Qwen3-ASR WebSocket 处理，此处跳过
+                // 仅处理 NLP 语义结果
+                if ("nlp".equals(sub) || "cbm_semantic".equals(sub)) {
                     processNlpResult(item);
                 }
             }
         } catch (Exception e) {
             UpdateLog.e("SpeechManager: processResultEvent error", e);
-        }
-    }
-
-    /**
-     * 处理 IAT (语音识别) 结果
-     */
-    private void processIatResult(JSONObject item) {
-        try {
-            JSONObject text = item.optJSONObject("text");
-            if (text == null) return;
-
-            boolean isLast = text.optBoolean("ls", false);
-            String pgs = text.optString("pgs", "");
-            int sn = text.optInt("sn", 0);
-
-            // 拼接识别文本
-            StringBuilder sb = new StringBuilder();
-            JSONArray ws = text.optJSONArray("ws");
-            if (ws != null) {
-                for (int i = 0; i < ws.length(); i++) {
-                    JSONArray cw = ws.getJSONObject(i).optJSONArray("cw");
-                    if (cw != null && cw.length() > 0) {
-                        sb.append(cw.getJSONObject(0).optString("w", ""));
-                    }
-                }
-            }
-            String word = sb.toString();
-
-            // 处理 PGS (动态修正)
-            if ("rpl".equals(pgs)) {
-                // 替换模式
-                JSONArray rg = text.optJSONArray("rg");
-                if (rg != null && rg.length() >= 2 && sn < mIatPgsStack.length) {
-                    String current = mIatPgsStack[sn] != null ? mIatPgsStack[sn] : "";
-                    int start = rg.optInt(0);
-                    int end = rg.optInt(1);
-                    if (start >= 0 && end <= current.length()) {
-                        current = current.substring(0, start) + word + current.substring(end);
-                    }
-                    mIatPgsStack[sn] = current;
-                    word = current;
-                }
-                mIatPgsIndex = sn;
-            } else {
-                if (sn < mIatPgsStack.length) {
-                    mIatPgsStack[sn] = word;
-                }
-                mIatPgsIndex = sn;
-            }
-
-            // 拼接完整文本
-            StringBuilder fullText = new StringBuilder();
-            for (int i = 0; i <= mIatPgsIndex; i++) {
-                if (mIatPgsStack[i] != null) {
-                    fullText.append(mIatPgsStack[i]);
-                }
-            }
-            mIatText = fullText.toString();
-
-            if (isLast) {
-                mLastFinalIat = mIatText;
-                // 清理栈
-                for (int i = 0; i < mIatPgsStack.length; i++) {
-                    mIatPgsStack[i] = null;
-                }
-                mIatPgsIndex = 0;
-            }
-
-            final String displayText = mIatText;
-            final boolean finalResult = isLast;
-
-            mHandler.post(() -> {
-                if (mCallback != null) mCallback.onIatResult(displayText, finalResult);
-            });
-        } catch (Exception e) {
-            UpdateLog.e("SpeechManager: processIatResult error", e);
         }
     }
 
@@ -384,6 +387,12 @@ public class SpeechManager {
     private void notifyError(final String msg) {
         mHandler.post(() -> {
             if (mCallback != null) mCallback.onError(msg);
+        });
+    }
+
+    private void notifyLog(final String tag, final String msg) {
+        mHandler.post(() -> {
+            if (mCallback != null) mCallback.onLog(tag, msg);
         });
     }
 }

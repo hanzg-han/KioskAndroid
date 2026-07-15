@@ -19,8 +19,8 @@ android {
         applicationId = "com.kiosk.app"
         minSdk = 30
         targetSdk = 33
-        versionCode = 22
-        versionName = "1.0.22"
+        versionCode = 24
+        versionName = "1.0.24"
     }
 
     buildTypes {
@@ -45,4 +45,5 @@ android {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

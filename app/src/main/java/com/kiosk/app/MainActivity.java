@@ -6,21 +6,30 @@ import android.app.TimePickerDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.TimePicker;
 import android.widget.Toast;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * Kiosk 主 Activity
@@ -28,7 +37,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.22";
+    private static final String APP_VERSION = "1.0.24";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -47,7 +56,11 @@ public class MainActivity extends Activity {
     private TextView mTvAsrText;
     private TextView mTvNlpText;
     private Button mBtnWakeup;
+    private ImageView mIvVideo;
+    private TextView mTvLogContent;
+    private ScrollView mSvLog;
     private SpeechManager mSpeechManager;
+    private final SimpleDateFormat mLogTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
 
     private final Runnable mKeepFullscreenTask = new Runnable() {
         @Override
@@ -81,13 +94,20 @@ public class MainActivity extends Activity {
         mTvAsrText = findViewById(R.id.tv_asr_text);
         mTvNlpText = findViewById(R.id.tv_nlp_text);
         mBtnWakeup = findViewById(R.id.btn_wakeup);
+        mIvVideo = findViewById(R.id.iv_video);
+        mTvLogContent = findViewById(R.id.tv_log_content);
+        mSvLog = findViewById(R.id.sv_log);
 
+        mTvLogContent.setMovementMethod(new ScrollingMovementMethod());
         mTvAsrStatus.setText("语音识别就绪 | v" + APP_VERSION);
+
+        appendLog("系统", "初始化完成，开始连接...");
 
         mBtnWakeup.setOnClickListener(v -> {
             if (mSpeechManager != null) {
                 mSpeechManager.wakeup();
                 Toast.makeText(this, "已发送唤醒命令", Toast.LENGTH_SHORT).show();
+                appendLog("ASR", "手动发送唤醒命令");
             }
         });
 
@@ -99,12 +119,14 @@ public class MainActivity extends Activity {
                 mTvAsrStatus.setTextColor(Color.parseColor("#4CAF50"));
                 mTvAsrText.setText("");
                 mTvNlpText.setText("");
+                appendLog("ASR", "设备已唤醒");
             }
 
             @Override
             public void onSleep() {
                 mTvAsrStatus.setText("已休眠");
                 mTvAsrStatus.setTextColor(Color.parseColor("#999999"));
+                appendLog("ASR", "设备进入休眠");
             }
 
             @Override
@@ -113,12 +135,16 @@ public class MainActivity extends Activity {
                 if (isFinal) {
                     mTvAsrStatus.setText("识别完成");
                     mTvAsrStatus.setTextColor(Color.parseColor("#1976D2"));
+                    appendLog("ASR", "识别结果: " + text);
                 }
             }
 
             @Override
             public void onNlpResult(String text) {
                 mTvNlpText.setText(text);
+                if (text != null && !text.isEmpty()) {
+                    appendLog("ASR", "NLP语义: " + text);
+                }
             }
 
             @Override
@@ -126,9 +152,17 @@ public class MainActivity extends Activity {
                 switch (vadStatus) {
                     case AiuiProtocol.VAD_BOS:
                         mTvAsrStatus.setText("检测到语音...");
+                        appendLog("音频", "VAD_BOS 开始说话");
                         break;
                     case AiuiProtocol.VAD_EOS:
                         mTvAsrStatus.setText("语音结束，识别中...");
+                        appendLog("音频", "VAD_EOS 结束说话");
+                        break;
+                    case AiuiProtocol.VAD_VOL:
+                        // 持续说话，不频繁记录日志
+                        break;
+                    default:
+                        appendLog("音频", "VAD静音");
                         break;
                 }
             }
@@ -137,15 +171,47 @@ public class MainActivity extends Activity {
             public void onError(String message) {
                 mTvAsrStatus.setText("错误: " + message);
                 mTvAsrStatus.setTextColor(Color.RED);
+                appendLog("错误", message);
+            }
+
+            @Override
+            public void onVideoFrame(byte[] frameData) {
+                // 将视频帧数据解码为 Bitmap 并显示
+                try {
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(frameData, 0, frameData.length);
+                    if (bitmap != null) {
+                        mIvVideo.setImageBitmap(bitmap);
+                    }
+                } catch (Exception e) {
+                    // 解码失败，可能不是标准图片格式
+                }
+            }
+
+            @Override
+            public void onLog(String tag, String message) {
+                appendLog(tag, message);
             }
         });
 
         // 自动连接
         mSpeechManager.connect();
 
-        UpdateLog.i("SpeechManager connected, ASR=" + AiuiProtocol.DEFAULT_ASR_IP +
+        UpdateLog.i("SpeechManager connected, UART=" + AiuiProtocol.DEFAULT_LOCAL_IP +
                     ", Audio=" + AiuiProtocol.DEFAULT_LOCAL_IP +
-                    ", Video=" + AiuiProtocol.DEFAULT_LOCAL_IP);
+                    ", Video=" + AiuiProtocol.DEFAULT_LOCAL_IP +
+                    ", QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
+    }
+
+    /**
+     * 追加日志到消息框
+     */
+    private void appendLog(String tag, String message) {
+        String timestamp = mLogTimeFormat.format(new Date());
+        String line = "[" + timestamp + "][" + tag + "] " + message + "\n";
+        mTvLogContent.append(line);
+
+        // 自动滚动到底部
+        mSvLog.post(() -> mSvLog.fullScroll(View.FOCUS_DOWN));
     }
 
     /**

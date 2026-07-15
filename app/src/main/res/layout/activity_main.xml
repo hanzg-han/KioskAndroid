@@ -7,63 +7,125 @@
     android:keepScreenOn="true"
     android:orientation="vertical">
 
-    <!-- 主内容区域 -->
+    <!-- 主内容区域：左边视频+识别，右边日志 -->
     <LinearLayout
         android:id="@+id/content_area"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:orientation="horizontal"
+        android:padding="4dp">
 
-        <!-- 唤醒/休眠状态 -->
-        <TextView
-            android:id="@+id/tv_asr_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="语音识别就绪"
-            android:textColor="#999999"
-            android:textSize="18sp" />
-
-        <!-- 识别文本 -->
-        <TextView
-            android:id="@+id/tv_asr_text"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp"
-            android:background="#F8F8F8"
+        <!-- 左边：视频 + 语音识别显示 -->
+        <LinearLayout
+            android:id="@+id/left_panel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="7"
             android:gravity="center"
-            android:padding="16dp"
-            android:text=""
-            android:textColor="#333333"
-            android:textSize="28sp" />
+            android:orientation="vertical"
+            android:padding="4dp">
 
-        <!-- NLP / 语义回答 -->
-        <TextView
-            android:id="@+id/tv_nlp_text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:maxLines="4"
-            android:padding="12dp"
-            android:text=""
-            android:textColor="#1976D2"
-            android:textSize="20sp" />
+            <!-- 唤醒/休眠状态 -->
+            <TextView
+                android:id="@+id/tv_asr_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="语音识别就绪"
+                android:textColor="#999999"
+                android:textSize="14sp" />
 
-        <!-- 手动唤醒按钮 -->
-        <Button
-            android:id="@+id/btn_wakeup"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginTop="8dp"
-            android:background="#64B5F6"
-            android:minWidth="120dp"
-            android:text="手动唤醒"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp" />
+            <!-- 视频显示区域 -->
+            <ImageView
+                android:id="@+id/iv_video"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"
+                android:background="#000000"
+                android:contentDescription="视频画面"
+                android:scaleType="fitCenter" />
+
+            <!-- 识别文本 -->
+            <TextView
+                android:id="@+id/tv_asr_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#F8F8F8"
+                android:gravity="center"
+                android:maxLines="3"
+                android:minHeight="36dp"
+                android:padding="4dp"
+                android:text=""
+                android:textColor="#333333"
+                android:textSize="18sp" />
+
+            <!-- NLP / 语义回答 -->
+            <TextView
+                android:id="@+id/tv_nlp_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="2"
+                android:minHeight="28dp"
+                android:padding="2dp"
+                android:text=""
+                android:textColor="#1976D2"
+                android:textSize="14sp" />
+
+            <!-- 手动唤醒按钮 -->
+            <Button
+                android:id="@+id/btn_wakeup"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginTop="2dp"
+                android:background="#64B5F6"
+                android:minWidth="100dp"
+                android:text="手动唤醒"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 右边：接口日志消息框 -->
+        <LinearLayout
+            android:id="@+id/right_panel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="3"
+            android:background="#1E1E1E"
+            android:orientation="vertical"
+            android:padding="4dp">
+
+            <TextView
+                android:id="@+id/tv_log_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="2dp"
+                android:text="接口日志"
+                android:textColor="#CCCCCC"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <ScrollView
+                android:id="@+id/sv_log"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+                <TextView
+                    android:id="@+id/tv_log_content"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="4dp"
+                    android:text=""
+                    android:textColor="#AAAAAA"
+                    android:textSize="10sp"
+                    android:typeface="monospace" />
+            </ScrollView>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 定时控制栏 -->
