@@ -45,7 +45,10 @@ public class SpeechManager {
     private long mSendCount = 0;
     private long mLastSendStatTime = 0;
     private long mSkipNotSending = 0;
+    private long mSkipChannelFiltered = 0;
     private boolean mFirstAudioLogged = false;
+    /** 只处理通道号 99 的音频帧 */
+    private static final int AUDIO_ENGINE_INDEX = 99;
     private static final int SEND_STAT_INTERVAL_MS = 10000;
 
     public interface SpeechCallback {
@@ -83,6 +86,10 @@ public class SpeechManager {
         mAudioClient = new AudioClient(new AiuiProtocol.AudioCallback() {
             @Override
             public void onAudioFrame(int vadStatus, int engineIndex, int frameIndex, byte[] pcmData) {
+                if (engineIndex != AUDIO_ENGINE_INDEX) {
+                    mSkipChannelFiltered++;
+                    return;
+                }
                 onAudioFrameReceived(vadStatus, frameIndex, pcmData);
             }
 
@@ -192,11 +199,12 @@ public class SpeechManager {
         if (mLastSendStatTime == 0) mLastSendStatTime = now;
         if (now - mLastSendStatTime >= SEND_STAT_INTERVAL_MS) {
             float rate = mSendCount * 1000f / (now - mLastSendStatTime);
-            UpdateLog.i(String.format("AudioSend: frames=%d rate=%.1f/s state=%d skipNoSend=%d",
-                    mSendCount, rate, mState, mSkipNotSending));
+            UpdateLog.i(String.format("AudioSend: frames=%d rate=%.1f/s state=%d skipNoSend=%d skipChan=%d",
+                    mSendCount, rate, mState, mSkipNotSending, mSkipChannelFiltered));
             mLastSendStatTime = now;
             mSendCount = 0;
             mSkipNotSending = 0;
+            mSkipChannelFiltered = 0;
         }
     }
 
