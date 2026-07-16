@@ -19,8 +19,8 @@ android {
         applicationId = "com.kiosk.app"
         minSdk = 30
         targetSdk = 33
-        versionCode = 27
-        versionName = "1.0.27"
+        versionCode = 29
+        versionName = "1.0.29"
     }
 
     buildTypes {

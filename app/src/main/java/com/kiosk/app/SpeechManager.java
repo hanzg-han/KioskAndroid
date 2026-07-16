@@ -3,58 +3,68 @@ package com.kiosk.app;
 import android.os.Handler;
 import android.os.Looper;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 /**
- * 语音识别管理器
- * 整合 UART/Audio/Video/Qwen3-ASR 通道，处理 ASR/NLP 结果
- * - UART: 唤醒/休眠/TTS 控制
- * - Audio: 接收 PCM 音频流
- * - Video: 接收视频流
- * - AsrWebSocket: 将 PCM 音频发送到 Qwen3-ASR WebSocket 获取识别文本
+ * 语音识别管理器 (VAD 驱动版，无 AIUI 引擎)
+ *
+ * 架构:
+ *   AudioClient (TCP:9080) → PCM音频帧(含VAD状态) → VAD_BOS/EOS 控制 ASR 发送
+ *   AsrWebSocketClient         → 流式发送音频到 Qwen3-ASR → 识别文本
+ *
+ * 状态机 (VAD 驱动):
+ *   IDLE ──VAD_BOS──▶ SENDING (连接ASR, 开始发送音频)
+ *   SENDING ──VAD_VOL──▶ SENDING (继续发送音频)
+ *   SENDING ──VAD_EOS──▶ IDLE (flush ASR, 获取最终结果)
+ *
+ * 不再依赖:
+ *   - UartClient (AIUI 引擎的 WAKEUP/SLEEP/NLP 事件)
+ *   - VideoClient
+ *   - engineIdx 过滤 (所有音频都处理)
  */
 public class SpeechManager {
 
     private static SpeechManager sInstance;
 
-    private UartClient mUartClient;
     private AudioClient mAudioClient;
-    private VideoClient mVideoClient;
     private AsrWebSocketClient mAsrWsClient;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private SpeechCallback mCallback;
 
-    // 当前状态
-    private volatile boolean mIsWakeup = false;
-    private volatile String mIatText = "";       // 当前识别文本 (来自 Qwen3-ASR)
-    private volatile String mLastFinalIat = "";  // 上一次最终结果
-    private volatile String mNlpResult = "";     // NLP 语义结果
-    private volatile int mVadStatus = 0;
+    // VAD 驱动状态
+    private static final int ST_IDLE = 0;
+    private static final int ST_SENDING = 1;
+    private volatile int mState = ST_IDLE;
 
-    // Qwen3-ASR 累积的完整文本（去重拼接）
+    private volatile int mVadStatus = AiuiProtocol.VAD_SILENCE;
+    private volatile String mIatText = "";
+
+    // ASR 累积文本
     private final StringBuilder mAsrFullText = new StringBuilder();
 
-    /** ASR 音频发送统计（调试用） */
+    // 发送统计
     private long mSendCount = 0;
-    private long mSkipNoWakeup = 0;
-    private long mSkipOtherEngine = 0;
     private long mLastSendStatTime = 0;
+    private long mSkipNotSending = 0;
     private boolean mFirstAudioLogged = false;
-    private static final int SEND_STAT_INTERVAL_MS = 10000; // 每10秒输出发送统计
+    private static final int SEND_STAT_INTERVAL_MS = 10000;
 
     public interface SpeechCallback {
+        /** VAD_BOS: 开始说话 */
         void onWakeup();
+        /** VAD_EOS: 结束说话 */
         void onSleep();
+        /** Qwen3-ASR 识别结果 */
         void onIatResult(String text, boolean isFinal);
-        void onNlpResult(String text);
+        /** VAD 状态变化 (BOS/VOL/EOS/SILENCE) */
         void onVadChanged(int vadStatus);
         void onError(String message);
-        /** 视频帧回调 */
-        void onVideoFrame(byte[] frameData);
-        /** 接口日志回调 */
         void onLog(String tag, String message);
+    }
+
+    private void notifyError(final String msg) {
+        mHandler.post(() -> {
+            if (mCallback != null) mCallback.onError(msg);
+        });
     }
 
     private SpeechManager() {}
@@ -69,114 +79,31 @@ public class SpeechManager {
     public void init(SpeechCallback callback) {
         this.mCallback = callback;
 
-        // UART 通道 (ASR 服务器)
-        mUartClient = new UartClient(new AiuiProtocol.UartCallback() {
-            @Override
-            public void onEvent(String eventType, int seqId, String jsonContent) {
-                handleUartEvent(eventType, jsonContent);
-            }
-
-            @Override
-            public void onConnectionState(boolean connected) {
-                String msg = "UART " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.UART_PORT :
-                        "断开连接");
-                UpdateLog.i("SpeechManager: " + msg);
-                notifyLog("ASR", msg);
-            }
-
-            @Override
-            public void onError(String message) {
-                notifyError("UART: " + message);
-                notifyLog("ASR", "错误: " + message);
-            }
-        });
-
-        // 音频通道 (本机)
+        // ── 音频通道 ──
         mAudioClient = new AudioClient(new AiuiProtocol.AudioCallback() {
             @Override
             public void onAudioFrame(int vadStatus, int engineIndex, int frameIndex, byte[] pcmData) {
-                if (!mFirstAudioLogged) {
-                    mFirstAudioLogged = true;
-                    UpdateLog.i(String.format("SpeechManager: FIRST audio frame! engineIdx=%d vad=%d pcmLen=%d wakeup=%s",
-                            engineIndex, vadStatus, pcmData != null ? pcmData.length : 0, mIsWakeup));
-                }
-                if (engineIndex == 99) { // 盒子内部送给 AIUI 的音频
-                    mVadStatus = vadStatus;
-                    mHandler.post(() -> {
-                        if (mCallback != null) mCallback.onVadChanged(vadStatus);
-                    });
-                    // 只在唤醒状态下才发送音频到 Qwen3-ASR，避免跨会话音频合并
-                    if (mIsWakeup && mAsrWsClient != null && pcmData != null && pcmData.length > 0) {
-                        mSendCount++;
-                        mAsrWsClient.sendAudio(pcmData);
-                    } else if (!mIsWakeup) {
-                        mSkipNoWakeup++;
-                    }
-                    // 每10秒输出发送统计
-                    long now = System.currentTimeMillis();
-                    if (mLastSendStatTime == 0) mLastSendStatTime = now;
-                    if (now - mLastSendStatTime >= SEND_STAT_INTERVAL_MS) {
-                        float sendRate = mSendCount * 1000f / (now - mLastSendStatTime);
-                        UpdateLog.i(String.format("AudioSend: sent=%d skipNoWake=%d skipEngine=%d rate=%.1f/s wakeup=%s",
-                                mSendCount, mSkipNoWakeup, mSkipOtherEngine, sendRate, mIsWakeup));
-                        mLastSendStatTime = now;
-                        mSendCount = 0;
-                        mSkipNoWakeup = 0;
-                        mSkipOtherEngine = 0;
-                    }
-                } else {
-                    mSkipOtherEngine++;
-                }
+                onAudioFrameReceived(vadStatus, frameIndex, pcmData);
             }
 
             @Override
             public void onConnectionState(boolean connected) {
-                String msg = "Audio " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.AUDIO_PORT :
-                        "断开连接");
-                UpdateLog.i("SpeechManager: " + msg);
+                String msg = connected ? "Audio 已连接" : "Audio 断开连接";
+                UpdateLog.i("SpeechMgr: " + msg);
                 notifyLog("音频", msg);
             }
 
             @Override
             public void onError(String message) {
-                String msg = "Audio error: " + message;
-                UpdateLog.e("SpeechManager: " + msg);
+                UpdateLog.e("SpeechMgr: Audio error: " + message);
                 notifyLog("音频", "错误: " + message);
             }
         });
 
-        // 视频通道 (本机)
-        mVideoClient = new VideoClient(new AiuiProtocol.VideoCallback() {
-            @Override
-            public void onVideoFrame(int frameIndex, byte[] frameData) {
-                // 转发视频帧到上层显示
-                final byte[] data = frameData;
-                mHandler.post(() -> {
-                    if (mCallback != null) mCallback.onVideoFrame(data);
-                });
-            }
-
-            @Override
-            public void onConnectionState(boolean connected) {
-                String msg = "Video " + (connected ? "已连接 " + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.VIDEO_PORT :
-                        "断开连接");
-                UpdateLog.i("SpeechManager: " + msg);
-                notifyLog("视频", msg);
-            }
-
-            @Override
-            public void onError(String message) {
-                String msg = "Video error: " + message;
-                UpdateLog.e("SpeechManager: " + msg);
-                notifyLog("视频", "错误: " + message);
-            }
-        });
-
-        // Qwen3-ASR WebSocket 通道 (代替 UART 做语音识别)
+        // ── ASR WebSocket ──
         mAsrWsClient = new AsrWebSocketClient(new AsrWebSocketClient.AsrCallback() {
             @Override
             public void onResult(String text, boolean isFinal) {
-                // Qwen3-ASR 返回增量文本，累积拼接
                 if (text != null && !text.isEmpty()) {
                     mAsrFullText.append(text);
                 }
@@ -189,244 +116,168 @@ public class SpeechManager {
 
             @Override
             public void onReady() {
-                UpdateLog.i("SpeechManager: Qwen3-ASR ready");
-                notifyLog("QwenASR", "服务就绪，可接收音频");
+                UpdateLog.i("SpeechMgr: ASR ready");
+                notifyLog("QwenASR", "就绪");
             }
 
             @Override
             public void onConnectionState(boolean connected) {
-                String msg = "QwenASR " + (connected ? "已连接 " + AsrWebSocketClient.DEFAULT_ASR_WS_URL :
-                        "断开连接");
-                UpdateLog.i("SpeechManager: " + msg);
+                String msg = connected ? "QwenASR 已连接" : "QwenASR 断开连接";
+                UpdateLog.i("SpeechMgr: " + msg);
                 notifyLog("QwenASR", msg);
             }
 
             @Override
             public void onError(String message) {
-                UpdateLog.e("SpeechManager: QwenASR error: " + message);
+                UpdateLog.e("SpeechMgr: ASR error: " + message);
                 notifyLog("QwenASR", "错误: " + message);
             }
         });
 
-        UpdateLog.i("SpeechManager: initialized");
+        UpdateLog.i("SpeechMgr: init done (VAD-driven, no AIUI engine)");
     }
 
+    /** 连接：仅启动音频客户端，ASR 在首次 VAD_BOS 时按需连接 */
     public void connect() {
-        notifyLog("系统", "开始连接: UART=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.UART_PORT);
-        notifyLog("系统", "开始连接: 音频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.AUDIO_PORT);
-        notifyLog("系统", "开始连接: 视频=" + AiuiProtocol.DEFAULT_LOCAL_IP + ":" + AiuiProtocol.VIDEO_PORT);
-        notifyLog("系统", "开始连接: QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
-        if (mUartClient != null) mUartClient.connect();
         if (mAudioClient != null) mAudioClient.connect();
-        if (mVideoClient != null) mVideoClient.connect();
-        if (mAsrWsClient != null) mAsrWsClient.connect();
     }
 
+    /** 断开所有连接 */
     public void disconnect() {
         if (mAsrWsClient != null) {
             mAsrWsClient.flush();
             mAsrWsClient.disconnect();
         }
-        if (mUartClient != null) mUartClient.disconnect();
         if (mAudioClient != null) mAudioClient.disconnect();
-        if (mVideoClient != null) mVideoClient.disconnect();
+        mState = ST_IDLE;
     }
 
-    public void wakeup() {
-        if (mUartClient != null) mUartClient.sendWakeup();
-    }
+    // ── 状态查询 ──
 
-    public void tts(String text) {
-        if (mUartClient != null) mUartClient.sendTts(text);
-    }
+    public boolean isWakeup() { return mState == ST_SENDING; }
+    public String getIatText() { return mIatText; }
 
-    public boolean isWakeup() {
-        return mIsWakeup;
-    }
+    // ═══════════════════════════════════════════════════
+    //  核心：VAD 驱动的音频处理
+    // ═══════════════════════════════════════════════════
 
-    public String getIatText() {
-        return mIatText;
-    }
+    private void onAudioFrameReceived(int vadStatus, int frameIndex, byte[] pcmData) {
+        if (!mFirstAudioLogged) {
+            mFirstAudioLogged = true;
+            UpdateLog.i(String.format("SpeechMgr: FIRST audio frame! vad=%d pcmLen=%d",
+                    vadStatus, pcmData != null ? pcmData.length : 0));
+        }
 
-    public String getNlpResult() {
-        return mNlpResult;
-    }
+        mVadStatus = vadStatus;
+        notifyVadChanged(vadStatus);
 
-    public String getLastFinalIat() {
-        return mLastFinalIat;
-    }
+        switch (vadStatus) {
+            case AiuiProtocol.VAD_BOS:
+                onVadBos(pcmData);
+                break;
+            case AiuiProtocol.VAD_VOL:
+                onVadVol(pcmData);
+                break;
+            case AiuiProtocol.VAD_EOS:
+                onVadEos(pcmData);
+                break;
+            default:
+                // VAD_SILENCE: 不发送
+                if (mState == ST_SENDING) mSkipNotSending++;
+                break;
+        }
 
-    // ========== 事件处理 ==========
-
-    private void handleUartEvent(String eventType, String json) {
-        try {
-            JSONObject obj = new JSONObject(json);
-            String content = obj.optString("content", "");
-
-            switch (eventType) {
-                case "EVENT_RESULT":
-                case "3":
-                    processResultEvent(content);
-                    break;
-                case "EVENT_WAKEUP":
-                case "4":
-                    mIsWakeup = true;
-                    mIatText = "";
-                    mNlpResult = "";
-                    mAsrFullText.setLength(0);  // 清空 Qwen3-ASR 累积文本
-                    mLastFinalIat = "";
-                    // 先断开旧会话（flush + disconnect），再重连，确保每次唤醒都是全新的 ASR 会话
-                    UpdateLog.i("SpeechManager: WAKEUP -> flush+disconnect+reconnect AsrWS");
-                    if (mAsrWsClient != null) {
-                        mAsrWsClient.flush();
-                        mAsrWsClient.disconnect();
-                        mAsrWsClient.connect();
-                    }
-                    mHandler.post(() -> {
-                        if (mCallback != null) mCallback.onWakeup();
-                    });
-                    break;
-                case "EVENT_SLEEP":
-                case "5":
-                    mIsWakeup = false;
-                    // 休眠前 flush 剩余音频并断开 ASR，确保会话边界
-                    UpdateLog.i("SpeechManager: SLEEP -> flush+disconnect AsrWS");
-                    if (mAsrWsClient != null) {
-                        mAsrWsClient.flush();
-                        mAsrWsClient.disconnect();
-                    }
-                    mAsrFullText.setLength(0);
-                    mLastFinalIat = mIatText;
-                    mHandler.post(() -> {
-                        if (mCallback != null) mCallback.onSleep();
-                    });
-                    break;
-                case "EVENT_VAD":
-                case "6":
-                    processVadEvent(content);
-                    break;
-                case "EVENT_ERROR":
-                case "2":
-                    processErrorEvent(content);
-                    break;
-                default:
-                    // 兼容: 不带 eventType，从 content 内部解析
-                    if (content != null && !content.isEmpty()) {
-                        try {
-                            JSONObject cObj = new JSONObject(content);
-                            String sub = cObj.optString("eventType", "");
-                            if (!sub.isEmpty()) {
-                                handleUartEvent(sub, json);
-                            }
-                        } catch (Exception ignored) {}
-                    }
-                    break;
-            }
-        } catch (Exception e) {
-            UpdateLog.e("SpeechManager: handleUartEvent error", e);
+        // 每 10 秒统计
+        long now = System.currentTimeMillis();
+        if (mLastSendStatTime == 0) mLastSendStatTime = now;
+        if (now - mLastSendStatTime >= SEND_STAT_INTERVAL_MS) {
+            float rate = mSendCount * 1000f / (now - mLastSendStatTime);
+            UpdateLog.i(String.format("AudioSend: frames=%d rate=%.1f/s state=%d skipNoSend=%d",
+                    mSendCount, rate, mState, mSkipNotSending));
+            mLastSendStatTime = now;
+            mSendCount = 0;
+            mSkipNotSending = 0;
         }
     }
 
-    private void processResultEvent(String content) {
-        try {
-            JSONObject cObj = new JSONObject(content);
-            JSONArray data = cObj.optJSONArray("data");
-            if (data == null) return;
+    private void onVadBos(byte[] pcmData) {
+        UpdateLog.i("SpeechMgr: ★ VAD_BOS → start new ASR session");
+        mAsrFullText.setLength(0);
+        mIatText = "";
 
-            for (int i = 0; i < data.length(); i++) {
-                JSONObject item = data.getJSONObject(i);
-                JSONObject params = item.optJSONObject("params");
-                if (params == null) continue;
-
-                String sub = params.optString("sub", "");
-
-                // IAT 识别已由 Qwen3-ASR WebSocket 处理，此处跳过
-                // 仅处理 NLP 语义结果
-                if ("nlp".equals(sub) || "cbm_semantic".equals(sub)) {
-                    processNlpResult(item);
-                }
+        // 连接到 ASR（内部自动处理已连接状态）
+        if (mAsrWsClient != null) {
+            if (!mAsrWsClient.isReady()) {
+                mAsrWsClient.connect();
+                UpdateLog.i("SpeechMgr: ASR connecting...");
+            } else {
+                UpdateLog.i("SpeechMgr: ASR already ready, reuse session");
             }
-        } catch (Exception e) {
-            UpdateLog.e("SpeechManager: processResultEvent error", e);
+        }
+
+        mState = ST_SENDING;
+        notifyWakeup();
+
+        // BOS 帧也有音频数据，发送
+        sendAudio(pcmData);
+    }
+
+    private void onVadVol(byte[] pcmData) {
+        if (mState == ST_SENDING) {
+            sendAudio(pcmData);
+        } else {
+            mSkipNotSending++;
         }
     }
 
-    /**
-     * 处理 NLP (语义理解) 结果
-     */
-    private void processNlpResult(JSONObject item) {
-        try {
-            StringBuilder result = new StringBuilder();
+    private void onVadEos(byte[] pcmData) {
+        if (mState != ST_SENDING) {
+            UpdateLog.d("SpeechMgr: VAD_EOS ignored, not in SENDING state");
+            return;
+        }
 
-            // 尝试 GPT 流式格式
-            String contentText = item.optString("content", "");
-            if (!contentText.isEmpty() && contentText.startsWith("{")) {
-                try {
-                    JSONObject contentObj = new JSONObject(contentText);
-                    if (contentObj.has("choices")) {
-                        JSONArray choices = contentObj.optJSONArray("choices");
-                        if (choices != null && choices.length() > 0) {
-                            JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                            if (delta != null) {
-                                String r = delta.optString("content", "");
-                                result.append(r);
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
+        UpdateLog.i("SpeechMgr: ★ VAD_EOS → flush ASR, end session");
 
-            // 尝试 CBM Semantic 格式
-            if (result.length() == 0) {
-                String answer = item.optString("answer", "");
-                if (!answer.isEmpty()) {
-                    result.append(answer);
-                } else {
-                    String intent = item.optString("intent", "");
-                    if (!intent.isEmpty()) {
-                        result.append("[").append(intent).append("]");
-                        String slot = item.optString("slot", "");
-                        if (!slot.isEmpty()) result.append(" ").append(slot);
-                    }
-                }
-            }
+        // 发送最后一帧
+        sendAudio(pcmData);
 
-            mNlpResult = result.toString();
-            final String nlpText = mNlpResult;
+        // flush 让 ASR 服务端输出最终结果
+        if (mAsrWsClient != null) {
+            mAsrWsClient.flush();
+        }
 
-            mHandler.post(() -> {
-                if (mCallback != null) mCallback.onNlpResult(nlpText);
-            });
-        } catch (Exception e) {
-            UpdateLog.e("SpeechManager: processNlpResult error", e);
+        mState = ST_IDLE;
+        mAsrFullText.setLength(0);
+        notifySleep();
+    }
+
+    private void sendAudio(byte[] pcmData) {
+        if (pcmData == null || pcmData.length == 0) return;
+        if (mAsrWsClient != null) {
+            mAsrWsClient.sendAudio(pcmData);
+            mSendCount++;
         }
     }
 
-    private void processVadEvent(String content) {
-        try {
-            JSONObject cObj = new JSONObject(content);
-            int vad = cObj.optInt("vad", cObj.optInt("status", -1));
-            if (vad >= 0) {
-                mVadStatus = vad;
-                mHandler.post(() -> {
-                    if (mCallback != null) mCallback.onVadChanged(vad);
-                });
-            }
-        } catch (Exception ignored) {}
-    }
+    // ═══════════════════════════════════════════════════
+    //  通知回调 (主线程)
+    // ═══════════════════════════════════════════════════
 
-    private void processErrorEvent(String content) {
-        try {
-            JSONObject cObj = new JSONObject(content);
-            int code = cObj.optInt("code", 0);
-            String msg = cObj.optString("msg", "");
-            notifyError("AIUI Error " + code + ": " + msg);
-        } catch (Exception ignored) {}
-    }
-
-    private void notifyError(final String msg) {
+    private void notifyWakeup() {
         mHandler.post(() -> {
-            if (mCallback != null) mCallback.onError(msg);
+            if (mCallback != null) mCallback.onWakeup();
+        });
+    }
+
+    private void notifySleep() {
+        mHandler.post(() -> {
+            if (mCallback != null) mCallback.onSleep();
+        });
+    }
+
+    private void notifyVadChanged(final int vad) {
+        mHandler.post(() -> {
+            if (mCallback != null) mCallback.onVadChanged(vad);
         });
     }
 
