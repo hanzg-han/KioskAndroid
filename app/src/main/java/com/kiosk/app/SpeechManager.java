@@ -1,14 +1,20 @@
 package com.kiosk.app;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 语音识别管理器 (VAD 驱动版，无 AIUI 引擎)
  *
  * 架构:
  *   AudioClient (TCP:9080) → PCM音频帧(含VAD状态) → VAD_BOS/EOS 控制 ASR 发送
- *   AsrWebSocketClient         → 流式发送音频到 Qwen3-ASR → 识别文本
+ *   VideoClient (TCP:9090) → 视频帧 → 后台解码 → 主线程显示
+ *   AsrWebSocketClient      → 流式发送音频到 Qwen3-ASR → 识别文本
  *
  * 状态机 (VAD 驱动):
  *   IDLE ──VAD_BOS──▶ SENDING (连接ASR, 开始发送音频)
@@ -17,18 +23,20 @@ import android.os.Looper;
  *
  * 不再依赖:
  *   - UartClient (AIUI 引擎的 WAKEUP/SLEEP/NLP 事件)
- *   - VideoClient
- *   - engineIdx 过滤 (所有音频都处理)
  */
 public class SpeechManager {
 
     private static SpeechManager sInstance;
 
     private AudioClient mAudioClient;
+    private VideoClient mVideoClient;
     private AsrWebSocketClient mAsrWsClient;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private SpeechCallback mCallback;
+
+    /** 视频帧后台解码线程（避免主线程解码导致卡顿） */
+    private ExecutorService mVideoDecodeExecutor;
 
     // VAD 驱动状态
     private static final int ST_IDLE = 0;
@@ -60,6 +68,8 @@ public class SpeechManager {
         void onIatResult(String text, boolean isFinal);
         /** VAD 状态变化 (BOS/VOL/EOS/SILENCE) */
         void onVadChanged(int vadStatus);
+        /** 视频帧（已在后台解码为 Bitmap，可直接显示） */
+        void onVideoFrame(Bitmap bitmap);
         void onError(String message);
         void onLog(String tag, String message);
     }
@@ -81,6 +91,11 @@ public class SpeechManager {
 
     public void init(SpeechCallback callback) {
         this.mCallback = callback;
+        mVideoDecodeExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "VideoDecoder");
+            t.setDaemon(true);
+            return t;
+        });
 
         // ── 音频通道 ──
         mAudioClient = new AudioClient(new AiuiProtocol.AudioCallback() {
@@ -104,6 +119,39 @@ public class SpeechManager {
             public void onError(String message) {
                 UpdateLog.e("SpeechMgr: Audio error: " + message);
                 notifyLog("音频", "错误: " + message);
+            }
+        });
+
+        // ── 视频通道 ──
+        mVideoClient = new VideoClient(new AiuiProtocol.VideoCallback() {
+            @Override
+            public void onVideoFrame(int frameIndex, byte[] frameData) {
+                if (mVideoDecodeExecutor == null || mVideoDecodeExecutor.isShutdown()) return;
+                mVideoDecodeExecutor.execute(() -> {
+                    try {
+                        Bitmap bitmap = BitmapFactory.decodeByteArray(frameData, 0, frameData.length);
+                        if (bitmap != null) {
+                            mHandler.post(() -> {
+                                if (mCallback != null) mCallback.onVideoFrame(bitmap);
+                            });
+                        }
+                    } catch (Exception e) {
+                        // 解码失败，跳过此帧
+                    }
+                });
+            }
+
+            @Override
+            public void onConnectionState(boolean connected) {
+                String msg = connected ? "Video 已连接" : "Video 断开连接";
+                UpdateLog.i("SpeechMgr: " + msg);
+                notifyLog("视频", msg);
+            }
+
+            @Override
+            public void onError(String message) {
+                UpdateLog.e("SpeechMgr: Video error: " + message);
+                notifyLog("视频", "错误: " + message);
             }
         });
 
@@ -144,9 +192,10 @@ public class SpeechManager {
         UpdateLog.i("SpeechMgr: init done (VAD-driven, no AIUI engine)");
     }
 
-    /** 连接：仅启动音频客户端，ASR 在首次 VAD_BOS 时按需连接 */
+    /** 连接：启动音频 + 视频客户端，ASR 在首次 VAD_BOS 时按需连接 */
     public void connect() {
         if (mAudioClient != null) mAudioClient.connect();
+        if (mVideoClient != null) mVideoClient.connect();
     }
 
     /** 断开所有连接 */
@@ -156,6 +205,11 @@ public class SpeechManager {
             mAsrWsClient.disconnect();
         }
         if (mAudioClient != null) mAudioClient.disconnect();
+        if (mVideoClient != null) mVideoClient.disconnect();
+        if (mVideoDecodeExecutor != null) {
+            mVideoDecodeExecutor.shutdownNow();
+            mVideoDecodeExecutor = null;
+        }
         mState = ST_IDLE;
     }
 

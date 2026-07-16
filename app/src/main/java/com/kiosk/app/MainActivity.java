@@ -6,6 +6,7 @@ import android.app.TimePickerDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +20,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.TimePicker;
@@ -34,7 +36,7 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.30";
+    private static final String APP_VERSION = "1.0.31";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
@@ -49,6 +51,7 @@ public class MainActivity extends Activity {
     // 语音识别相关
     private TextView mTvAsrStatus;
     private TextView mTvAsrText;
+    private ImageView mIvVideo;
     private TextView mTvLogContent;
     private ScrollView mSvLog;
     private SpeechManager mSpeechManager;
@@ -84,13 +87,14 @@ public class MainActivity extends Activity {
     private void initSpeechRecognition() {
         mTvAsrStatus = findViewById(R.id.tv_asr_status);
         mTvAsrText = findViewById(R.id.tv_asr_text);
+        mIvVideo = findViewById(R.id.iv_video);
         mTvLogContent = findViewById(R.id.tv_log_content);
         mSvLog = findViewById(R.id.sv_log);
 
         mTvLogContent.setMovementMethod(new ScrollingMovementMethod());
         mTvAsrStatus.setText("语音识别就绪 (VAD驱动) | v" + APP_VERSION);
 
-        appendLog("系统", "初始化完成，开始连接音频...");
+        appendLog("系统", "初始化完成，开始连接音频+视频...");
 
         mSpeechManager = SpeechManager.getInstance();
         mSpeechManager.init(new SpeechManager.SpeechCallback() {
@@ -121,17 +125,17 @@ public class MainActivity extends Activity {
             public void onVadChanged(int vadStatus) {
                 switch (vadStatus) {
                     case AiuiProtocol.VAD_BOS:
-                        // 已在 onWakeup 中处理
-                        break;
                     case AiuiProtocol.VAD_EOS:
-                        // 已在 onSleep 中处理
-                        break;
                     case AiuiProtocol.VAD_VOL:
-                        // 持续说话中，不频繁记录
                         break;
                     default:
                         break;
                 }
+            }
+
+            @Override
+            public void onVideoFrame(Bitmap bitmap) {
+                mIvVideo.setImageBitmap(bitmap);
             }
 
             @Override
@@ -151,6 +155,7 @@ public class MainActivity extends Activity {
         mSpeechManager.connect();
 
         UpdateLog.i("SpeechManager VAD-driven mode, Audio=" + AiuiProtocol.DEFAULT_LOCAL_IP +
+                    ", Video=" + AiuiProtocol.DEFAULT_LOCAL_IP +
                     ", QwenASR=" + AsrWebSocketClient.DEFAULT_ASR_WS_URL);
     }
 
