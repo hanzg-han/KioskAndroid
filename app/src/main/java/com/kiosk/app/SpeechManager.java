@@ -275,9 +275,13 @@ public class SpeechManager {
                     mNlpResult = "";
                     mAsrFullText.setLength(0);  // 清空 Qwen3-ASR 累积文本
                     mLastFinalIat = "";
-                    // 重新连接 ASR，开始全新会话
-                    UpdateLog.i("SpeechManager: WAKEUP -> reconnect AsrWS");
-                    if (mAsrWsClient != null) mAsrWsClient.connect();
+                    // 先断开旧会话（flush + disconnect），再重连，确保每次唤醒都是全新的 ASR 会话
+                    UpdateLog.i("SpeechManager: WAKEUP -> flush+disconnect+reconnect AsrWS");
+                    if (mAsrWsClient != null) {
+                        mAsrWsClient.flush();
+                        mAsrWsClient.disconnect();
+                        mAsrWsClient.connect();
+                    }
                     mHandler.post(() -> {
                         if (mCallback != null) mCallback.onWakeup();
                     });
