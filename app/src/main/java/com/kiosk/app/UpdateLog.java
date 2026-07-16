@@ -15,7 +15,8 @@ import java.util.Locale;
  * 更新日志工具
  * 主路径(内部存储, 无需权限): /data/data/com.kiosk.app/files/kiosk_update.log
  *   读取方式: adb shell run-as com.kiosk.app cat files/kiosk_update.log
- * 备用路径: /sdcard/kiosk_update.log (部分设备可能写入失败)
+ * 备用路径(外置存储, 无需权限): /sdcard/Android/data/com.kiosk.app/files/kiosk_update.log
+ *   读取方式: adb pull /sdcard/Android/data/com.kiosk.app/files/kiosk_update.log
  */
 public class UpdateLog {
 
@@ -38,14 +39,18 @@ public class UpdateLog {
                 logFile.delete();
             }
 
-            // 备用路径: /sdcard/
-            sExtPath = "/sdcard/kiosk_update.log";
-            try {
-                File extFile = new File(sExtPath);
-                if (extFile.exists() && extFile.length() > 500 * 1024) {
-                    extFile.delete();
-                }
-            } catch (Exception ignored) {}
+            // 备用路径: 应用专属外部存储，无需权限
+            File extDir = context.getExternalFilesDir("logs");
+            if (extDir != null) {
+                extDir.mkdirs();
+                sExtPath = new File(extDir, "kiosk_update.log").getAbsolutePath();
+                try {
+                    File extFile = new File(sExtPath);
+                    if (extFile.exists() && extFile.length() > 500 * 1024) {
+                        extFile.delete();
+                    }
+                } catch (Exception ignored) {}
+            }
 
             String initMsg = "UpdateLog init: primary=" + sPrimaryPath + ", ext=" + sExtPath;
             Log.i(TAG, initMsg);
