@@ -1,7 +1,6 @@
 package com.kiosk.app;
 
 import android.content.Context;
-import android.util.Log;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -12,18 +11,17 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * 更新日志工具
- * 主路径(内部存储, 无需权限): /data/data/com.kiosk.app/files/kiosk_update.log
- *   读取方式: adb shell run-as com.kiosk.app cat files/kiosk_update.log
- * 备用路径(外置存储, 无需权限): /sdcard/Android/data/com.kiosk.app/files/kiosk_update.log
- *   读取方式: adb pull /sdcard/Android/data/com.kiosk.app/files/kiosk_update.log
+ * 日志工具 —— 仅写文件，不输出到 logcat
+ * 主路径(内部存储): /data/data/com.kiosk.app/files/logs/kiosk_update.log
+ *   读取: adb shell run-as com.kiosk.app cat files/logs/kiosk_update.log
+ * 备用路径(外部存储): /sdcard/Android/data/com.kiosk.app/files/logs/kiosk_update.log
+ *   读取: adb pull /sdcard/Android/data/com.kiosk.app/files/logs/kiosk_update.log .
  */
 public class UpdateLog {
 
-    private static final String TAG = "KioskUpdate";
     private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
     private static String sPrimaryPath = null;   // 内部存储，一定可用
-    private static String sExtPath = null;       // /sdcard/，不一定可用
+    private static String sExtPath = null;       // 外部存储，不一定可用
 
     public static synchronized void init(Context context) {
         if (sPrimaryPath != null) return;
@@ -33,9 +31,9 @@ public class UpdateLog {
             internalDir.mkdirs();
             sPrimaryPath = new File(internalDir, "kiosk_update.log").getAbsolutePath();
 
-            // 截断旧日志
+            // 每次启动自动清理旧日志
             File logFile = new File(sPrimaryPath);
-            if (logFile.exists() && logFile.length() > 500 * 1024) {
+            if (logFile.exists()) {
                 logFile.delete();
             }
 
@@ -46,34 +44,36 @@ public class UpdateLog {
                 sExtPath = new File(extDir, "kiosk_update.log").getAbsolutePath();
                 try {
                     File extFile = new File(sExtPath);
-                    if (extFile.exists() && extFile.length() > 500 * 1024) {
+                    if (extFile.exists()) {
                         extFile.delete();
                     }
                 } catch (Exception ignored) {}
             }
 
             String initMsg = "UpdateLog init: primary=" + sPrimaryPath + ", ext=" + sExtPath;
-            Log.i(TAG, initMsg);
             writeRaw(sPrimaryPath, "I", initMsg);
         } catch (Exception e) {
-            Log.e(TAG, "UpdateLog init failed", e);
+            // init 失败，尝试直接写文件
+            try {
+                if (sPrimaryPath != null) {
+                    writeRaw(sPrimaryPath, "E", "UpdateLog init failed: " + e.getMessage());
+                }
+            } catch (Exception ignored) {}
         }
     }
 
     private static synchronized void write(String level, String msg) {
         String ts = SDF.format(new Date());
-        String line = ts + " [" + level + "] " + msg;
-        // 始终输出到 logcat
-        Log.d(TAG, msg);
+        String line = ts + " [" + level + "] " + msg + "\n";
 
         // 写入主路径
         if (sPrimaryPath != null) {
-            writeRaw(sPrimaryPath, null, line + "\n");
+            writeRaw(sPrimaryPath, null, line);
         }
 
-        // 尝试写入 /sdcard/
+        // 尝试写入外部路径
         if (sExtPath != null) {
-            writeRaw(sExtPath, null, line + "\n");
+            writeRaw(sExtPath, null, line);
         }
     }
 

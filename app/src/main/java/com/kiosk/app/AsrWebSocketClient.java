@@ -5,8 +5,6 @@ import android.os.Looper;
 
 import org.json.JSONObject;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -19,13 +17,13 @@ import okio.ByteString;
 
 /**
  * Qwen3-ASR WebSocket 客户端
- * 将 PCM int16 音频转为 float32，流式发送到 Qwen3-ASR 服务端获取识别文本
+ * 将 PCM int16 音频流式发送到 Qwen3-ASR 服务端获取识别文本
  *
  * 协议:
  *   1. 连接 ws://host:8765/ws/transcribe
  *   2. 发送握手: {"model":"1.7B","language":"Chinese"}
  *   3. 接收 {"status":"ready"}
- *   4. 流式发送 PCM float32 binary frames
+ *   4. 流式发送 PCM int16 binary frames
  *   5. 接收 {"type":"result","text":"...","is_final":false}
  */
 public class AsrWebSocketClient {
@@ -226,7 +224,7 @@ public class AsrWebSocketClient {
     private static final int WS_STAT_INTERVAL_MS = 10000;
 
     /**
-     * 发送 PCM int16 音频数据，内部转换为 float32
+     * 发送 PCM int16 音频数据（服务端已改为 int16 格式）
      * @param pcmInt16 PCM int16 格式原始字节
      */
     public void sendAudio(byte[] pcmInt16) {
@@ -235,13 +233,11 @@ public class AsrWebSocketClient {
             return;
         }
         try {
-            byte[] float32Data = convertInt16ToFloat32(pcmInt16);
-            mWebSocket.send(ByteString.of(float32Data));
+            mWebSocket.send(ByteString.of(pcmInt16));
             mWsSentCount++;
             if (!mFirstFrameLogged) {
                 mFirstFrameLogged = true;
-                UpdateLog.i(String.format("AsrWS: FIRST frame sent! pcm=%d float32=%d",
-                        pcmInt16.length, float32Data.length));
+                UpdateLog.i(String.format("AsrWS: FIRST frame sent! pcmLen=%d", pcmInt16.length));
             }
             // 每10秒输出发送统计
             long now = System.currentTimeMillis();
@@ -323,25 +319,6 @@ public class AsrWebSocketClient {
         }
     }
 
-    // ========== 音频格式转换 ==========
-
-    /**
-     * PCM int16 → float32 (little-endian)
-     * int16 范围 [-32768, 32767] → float32 [-1.0, 1.0]
-     */
-    private static byte[] convertInt16ToFloat32(byte[] int16Data) {
-        int numSamples = int16Data.length / 2;
-        ByteBuffer floatBuf = ByteBuffer.allocate(numSamples * 4);
-        floatBuf.order(ByteOrder.LITTLE_ENDIAN);
-
-        for (int i = 0; i < int16Data.length - 1; i += 2) {
-            short sample = (short) ((int16Data[i] & 0xFF) | ((int16Data[i + 1] & 0xFF) << 8));
-            float f = sample / 32768.0f;
-            floatBuf.putFloat(f);
-        }
-
-        return floatBuf.array();
-    }
 
     // ========== 内部方法 ==========
 

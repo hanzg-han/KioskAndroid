@@ -380,7 +380,7 @@ public class MainActivity extends Activity {
         try {
             Runtime.getRuntime().exec("wm density " + density);
         } catch (Exception e) {
-            android.util.Log.e("Kiosk", "setDisplayDensity failed: " + e.getMessage());
+            UpdateLog.e("setDisplayDensity failed: " + e.getMessage());
         }
     }
 

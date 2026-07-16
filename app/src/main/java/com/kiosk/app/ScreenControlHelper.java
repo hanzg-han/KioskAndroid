@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
-import android.util.Log;
 
 import java.util.Calendar;
 
@@ -17,7 +16,6 @@ import java.util.Calendar;
  */
 public class ScreenControlHelper {
 
-    private static final String TAG = "ScreenControl";
     private static final String PREFS_NAME = "kiosk_screen_schedule";
 
     // SharedPreferences 键
@@ -39,7 +37,7 @@ public class ScreenControlHelper {
                 .putInt(KEY_OFF_HOUR, hour)
                 .putInt(KEY_OFF_MINUTE, minute)
                 .apply();
-        Log.d(TAG, "Save screen off: " + hour + ":" + String.format("%02d", minute));
+        UpdateLog.d("Save screen off: " + hour + ":" + String.format("%02d", minute));
         scheduleScreenOff(ctx);
     }
 
@@ -49,7 +47,7 @@ public class ScreenControlHelper {
                 .putInt(KEY_ON_HOUR, hour)
                 .putInt(KEY_ON_MINUTE, minute)
                 .apply();
-        Log.d(TAG, "Save screen on: " + hour + ":" + String.format("%02d", minute));
+        UpdateLog.d("Save screen on: " + hour + ":" + String.format("%02d", minute));
         scheduleScreenOn(ctx);
     }
 
@@ -127,7 +125,7 @@ public class ScreenControlHelper {
             } else {
                 am.set(AlarmManager.RTC_WAKEUP, target.getTimeInMillis(), pending);
             }
-            Log.d(TAG, "Screen OFF scheduled: " + target.getTime());
+            UpdateLog.d("Screen OFF scheduled: " + target.getTime());
         }
     }
 
@@ -157,7 +155,7 @@ public class ScreenControlHelper {
             } else {
                 am.set(AlarmManager.RTC_WAKEUP, target.getTimeInMillis(), pending);
             }
-            Log.d(TAG, "Screen ON scheduled: " + target.getTime());
+            UpdateLog.d("Screen ON scheduled: " + target.getTime());
         }
     }
 
