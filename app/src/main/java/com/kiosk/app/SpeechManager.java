@@ -18,7 +18,8 @@ import java.util.concurrent.Executors;
  *
  * 状态机 (VAD 驱动):
  *   IDLE ──VAD_BOS──▶ SENDING (连接ASR, 开始发送音频)
- *   SENDING ──VAD_VOL──▶ SENDING (继续发送音频)
+ *   SENDING ──VAD_VOL──▶ SENDING (继续发送音频, 重置静音计数)
+ *   SENDING ──连续SILENCE──▶ 发送 chunk_boundary (v2 协议, 主动分片)
  *   SENDING ──VAD_EOS──▶ IDLE (flush ASR, 获取最终结果)
  *
  * 不再依赖:
@@ -48,6 +49,14 @@ public class SpeechManager {
 
     // ASR 累积文本
     private final StringBuilder mAsrFullText = new StringBuilder();
+
+    // chunk_boundary 相关（v2 协议）
+    private int mSilenceFrameCount = 0;
+    private int mVoiceFrameCount = 0;
+    private long mLastChunkBoundaryTime = 0;
+    private static final int SILENCE_FRAMES_FOR_BOUNDARY = 2;   // 连续 2 帧静音 ≈ 500ms
+    private static final int VOICE_FRAMES_MIN = 4;              // 至少有过 4 帧有声 ≈ 1s
+    private static final int MIN_BOUNDARY_INTERVAL_MS = 1000;   // 两次 chunk_boundary 最小间隔
 
     // 发送统计
     private long mSendCount = 0;
@@ -246,8 +255,12 @@ public class SpeechManager {
                 onVadEos(pcmData);
                 break;
             default:
-                // VAD_SILENCE: 不发送
-                if (mState == ST_SENDING) mSkipNotSending++;
+                // VAD_SILENCE: 不发送音频，但跟踪静音帧用于 chunk_boundary
+                if (mState == ST_SENDING) {
+                    mSkipNotSending++;
+                    mSilenceFrameCount++;
+                    trySendChunkBoundary();
+                }
                 break;
         }
 
@@ -269,6 +282,9 @@ public class SpeechManager {
         UpdateLog.i("SpeechMgr: ★ VAD_BOS → start new ASR session");
         mAsrFullText.setLength(0);
         mIatText = "";
+        mSilenceFrameCount = 0;
+        mVoiceFrameCount = 0;
+        mLastChunkBoundaryTime = 0;
 
         // 连接到 ASR（内部自动处理已连接状态）
         if (mAsrWsClient != null) {
@@ -289,6 +305,8 @@ public class SpeechManager {
 
     private void onVadVol(byte[] pcmData) {
         if (mState == ST_SENDING) {
+            mSilenceFrameCount = 0;
+            mVoiceFrameCount++;
             sendAudio(pcmData);
         } else {
             mSkipNotSending++;
@@ -321,6 +339,20 @@ public class SpeechManager {
         if (mAsrWsClient != null) {
             mAsrWsClient.sendAudio(pcmData);
             mSendCount++;
+        }
+    }
+
+    /** v2 协议：连续静音达到阈值时发送 chunk_boundary */
+    private void trySendChunkBoundary() {
+        if (mSilenceFrameCount < SILENCE_FRAMES_FOR_BOUNDARY) return;
+        if (mVoiceFrameCount < VOICE_FRAMES_MIN) return;
+        long now = System.currentTimeMillis();
+        if (mLastChunkBoundaryTime > 0 && now - mLastChunkBoundaryTime < MIN_BOUNDARY_INTERVAL_MS) return;
+        if (mAsrWsClient != null && mAsrWsClient.isReady()) {
+            mAsrWsClient.sendChunkBoundary();
+            mSilenceFrameCount = 0;
+            mVoiceFrameCount = 0;
+            mLastChunkBoundaryTime = now;
         }
     }
 

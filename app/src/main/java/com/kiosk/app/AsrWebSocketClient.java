@@ -28,8 +28,8 @@ import okio.ByteString;
  */
 public class AsrWebSocketClient {
 
-    /** Qwen3-ASR 服务默认地址 */
-    public static final String DEFAULT_ASR_WS_URL = "ws://192.168.0.119:8765/ws/transcribe";
+    /** Qwen3-ASR 服务默认地址 (v2 协议路径为 /ws) */
+    public static final String DEFAULT_ASR_WS_URL = "ws://192.168.0.119:8765/ws";
 
     private static final int SAMPLE_RATE = 16000;
     private static final int RECONNECT_DELAY_MS = 3000;
@@ -106,6 +106,7 @@ public class AsrWebSocketClient {
                                 JSONObject cfg = new JSONObject();
                                 cfg.put("model", "1.7B");
                                 cfg.put("language", "Chinese");
+                                cfg.put("clinic_mode", true);
                                 webSocket.send(cfg.toString());
                                 UpdateLog.i("AsrWS: handshake sent: " + cfg);
                             } catch (Exception e) {
@@ -270,6 +271,23 @@ public class AsrWebSocketClient {
         }
     }
 
+    /**
+     * 强制分片指令（v2 新增），指示服务端立即对当前累积音频执行推理
+     * 用于 VAD 检测到停顿（连续静音 ~500ms）时主动分片
+     */
+    public void sendChunkBoundary() {
+        if (mReady.get() && mWebSocket != null) {
+            try {
+                JSONObject msg = new JSONObject();
+                msg.put("action", "chunk_boundary");
+                mWebSocket.send(msg.toString());
+                UpdateLog.d("AsrWS: chunk_boundary sent");
+            } catch (Exception e) {
+                UpdateLog.e("AsrWS: chunk_boundary error", e);
+            }
+        }
+    }
+
     public boolean isReady() {
         return mReady.get();
     }
@@ -305,6 +323,10 @@ public class AsrWebSocketClient {
                 });
             } else if ("heartbeat".equals(type)) {
                 // 忽略心跳
+            } else if ("status".equals(type)) {
+                // v2 新增：信号弱/静音跳过等状态通知
+                String msg = obj.optString("msg", "");
+                UpdateLog.d("AsrWS: status: " + msg);
             } else if ("error".equals(type)) {
                 String msg = obj.optString("message", "unknown error");
                 UpdateLog.e("AsrWS: server error: " + msg);
