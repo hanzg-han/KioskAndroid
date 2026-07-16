@@ -129,7 +129,10 @@ public class SpeechManager {
                 if (mVideoDecodeExecutor == null || mVideoDecodeExecutor.isShutdown()) return;
                 mVideoDecodeExecutor.execute(() -> {
                     try {
-                        Bitmap bitmap = BitmapFactory.decodeByteArray(frameData, 0, frameData.length);
+                        BitmapFactory.Options opts = new BitmapFactory.Options();
+                        opts.inSampleSize = 2;
+                        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+                        Bitmap bitmap = BitmapFactory.decodeByteArray(frameData, 0, frameData.length, opts);
                         if (bitmap != null) {
                             mHandler.post(() -> {
                                 if (mCallback != null) mCallback.onVideoFrame(bitmap);

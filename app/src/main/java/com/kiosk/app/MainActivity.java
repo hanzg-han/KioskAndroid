@@ -36,7 +36,7 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_VERSION = "1.0.31";
+    private static final String APP_VERSION = "1.0.32";
 
     private static final int DPI_DEFAULT = 240;  // 默认 DPI（隐藏导航栏时）
     private static final int DPI_NAVBAR  = 200;  // 显示导航栏时的 DPI
