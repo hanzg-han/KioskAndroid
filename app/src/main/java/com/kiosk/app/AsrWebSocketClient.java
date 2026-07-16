@@ -28,8 +28,8 @@ import okio.ByteString;
  */
 public class AsrWebSocketClient {
 
-    /** Qwen3-ASR 服务默认地址 (v2 协议路径为 /ws) */
-    public static final String DEFAULT_ASR_WS_URL = "ws://192.168.0.119:8765/ws";
+    /** Qwen3-ASR 服务默认地址 */
+    public static final String DEFAULT_ASR_WS_URL = "ws://192.168.0.119:8765/ws/transcribe";
 
     private static final int SAMPLE_RATE = 16000;
     private static final int RECONNECT_DELAY_MS = 3000;
