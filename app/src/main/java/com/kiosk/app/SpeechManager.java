@@ -19,7 +19,7 @@ import java.util.concurrent.Executors;
  * 状态机 (VAD 驱动):
  *   IDLE ──VAD_BOS──▶ SENDING (连接ASR, 开始发送音频)
  *   SENDING ──VAD_VOL──▶ SENDING (继续发送音频, 重置静音计数)
- *   SENDING ──连续SILENCE──▶ 发送 chunk_boundary (v2 协议, 主动分片)
+ *   SENDING ──连续SILENCE──▶ 发送 chunk_boundary (V1.0 协议, 主动分片)
  *   SENDING ──VAD_EOS──▶ IDLE (flush ASR, 获取最终结果)
  *
  * 不再依赖:
@@ -342,7 +342,7 @@ public class SpeechManager {
         }
     }
 
-    /** v2 协议：连续静音达到阈值时发送 chunk_boundary */
+    /** V1.0 协议：连续静音达到阈值时发送 chunk_boundary */
     private void trySendChunkBoundary() {
         if (mSilenceFrameCount < SILENCE_FRAMES_FOR_BOUNDARY) return;
         if (mVoiceFrameCount < VOICE_FRAMES_MIN) return;

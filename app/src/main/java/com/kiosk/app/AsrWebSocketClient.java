@@ -22,11 +22,13 @@ import okio.ByteString;
  * 协议:
  *   1. 连接 ws://host:8765/ws/transcribe
  *   2. 发送握手: {"model":"1.7B","language":"Chinese","clinic_mode":true}
- *   3. 接收 {"status":"ready","chunk_sec":2.0,"session_id":"...","clinic_mode":...}
+ *   3. 接收 {"type":"status","value":"ready","chunk_sec":2.0,"session_id":"...","clinic_mode":...}
  *   4. 流式发送 PCM int16 binary frames
- *   5. 接收 {"type":"result","text":"...","is_final":false}
+ *   5. 接收 {"type":"result","text":"...","is_final":false,...}
  *   6. 发送 {"action":"chunk_boundary"} 或 {"action":"flush"}
- *   7. 接收 {"status":"flushed"}
+ *   7. 接收 {"type":"status","value":"flushed","total_chunks":...,"total_kb":...}
+ *   8. 接收 {"type":"heartbeat","msg":"...","gap_sec":...} (30s 无数据)
+ *   9. 接收 {"type":"error","message":"...","stage":"..."}
  */
 public class AsrWebSocketClient {
 
@@ -274,7 +276,7 @@ public class AsrWebSocketClient {
     }
 
     /**
-     * 强制分片指令（v2 新增），指示服务端立即对当前累积音频执行推理
+     * 强制分片指令（V1.0），指示服务端立即对当前累积音频执行推理
      * 用于 VAD 检测到停顿（连续静音 ~500ms）时主动分片
      */
     public void sendChunkBoundary() {
@@ -299,44 +301,73 @@ public class AsrWebSocketClient {
     private void handleTextMessage(String text) {
         try {
             JSONObject obj = new JSONObject(text);
-
             String type = obj.optString("type", "");
-            String status = obj.optString("status", "");
 
-            if ("ready".equals(status)) {
-                // 握手成功
-                mReady.set(true);
-                mFirstFrameLogged = false;
-                UpdateLog.i("AsrWS: handshake OK, ready to send audio");
-                mHandler.post(() -> {
-                    notifyConnectionState(true);
-                    if (mCallback != null) mCallback.onReady();
-                });
+            if ("status".equals(type)) {
+                // V1.0: {"type":"status","value":"ready"|"flushed",...}
+                String value = obj.optString("value", "");
+                if ("ready".equals(value)) {
+                    // 握手成功
+                    mReady.set(true);
+                    mFirstFrameLogged = false;
+                    String sessionId = obj.optString("session_id", "");
+                    double chunkSec = obj.optDouble("chunk_sec", 2.0);
+                    boolean clinic = obj.optBoolean("clinic_mode", false);
+                    UpdateLog.i(String.format("AsrWS: ready (session=%s chunk_sec=%.1f clinic_mode=%s)",
+                            sessionId, chunkSec, clinic));
+                    mHandler.post(() -> {
+                        notifyConnectionState(true);
+                        if (mCallback != null) mCallback.onReady();
+                    });
+                } else if ("flushed".equals(value)) {
+                    int totalChunks = obj.optInt("total_chunks", 0);
+                    int totalPackets = obj.optInt("total_packets", 0);
+                    double totalKb = obj.optDouble("total_kb", 0);
+                    UpdateLog.i(String.format("AsrWS: flushed OK (chunks=%d packets=%d kb=%.1f)",
+                            totalChunks, totalPackets, totalKb));
+                } else {
+                    UpdateLog.d("AsrWS: status value=" + value);
+                }
             } else if ("result".equals(type)) {
-                // 识别结果
+                // V1.0: {"type":"result","text":"...","is_final":...,"chunk_idx":...,...}
                 String resultText = obj.optString("text", "");
                 boolean isFinal = obj.optBoolean("is_final", false);
+                int chunkIdx = obj.optInt("chunk_idx", 0);
                 double elapsed = obj.optDouble("elapsed", 0);
-                UpdateLog.i("AsrWS: result text=" + resultText + " elapsed=" + elapsed + "s");
+                double inferTime = obj.optDouble("infer_time", 0);
+                double chunkDuration = obj.optDouble("chunk_duration", 0);
+                double audioRms = obj.optDouble("audio_rms", 0);
+                double audioPeak = obj.optDouble("audio_peak", 0);
+                String debugWav = obj.optString("debug_wav", "");
+                UpdateLog.i(String.format(
+                        "AsrWS: result #%d text=\"%s\" final=%s dur=%.2fs elapsed=%.2fs infer=%.2fs rms=%.4f peak=%.4f wav=%s",
+                        chunkIdx, resultText, isFinal, chunkDuration, elapsed, inferTime,
+                        audioRms, audioPeak, debugWav));
                 final String textOut = resultText;
                 final boolean finalOut = isFinal;
                 mHandler.post(() -> {
                     if (mCallback != null) mCallback.onResult(textOut, finalOut);
                 });
             } else if ("heartbeat".equals(type)) {
-                // 忽略心跳
-            } else if ("status".equals(type)) {
-                // V1.0 未定义，但保留防御性日志
+                // V1.0: {"type":"heartbeat","msg":"...","gap_sec":...,"received_packets":...,...}
                 String msg = obj.optString("msg", "");
-                UpdateLog.d("AsrWS: status: " + msg);
+                double gapSec = obj.optDouble("gap_sec", 0);
+                int receivedPackets = obj.optInt("received_packets", 0);
+                UpdateLog.d(String.format("AsrWS: heartbeat gap=%.1fs packets=%d msg=%s",
+                        gapSec, receivedPackets, msg));
             } else if ("error".equals(type)) {
+                // V1.0: {"type":"error","message":"...","chunk_idx":...,"stage":"..."}
                 String msg = obj.optString("message", "unknown error");
-                UpdateLog.e("AsrWS: server error: " + msg);
+                int chunkIdx = obj.optInt("chunk_idx", 0);
+                String stage = obj.optString("stage", "");
+                UpdateLog.e(String.format("AsrWS: server error (chunk=%d stage=%s): %s",
+                        chunkIdx, stage, msg));
                 mHandler.post(() -> {
                     if (mCallback != null) mCallback.onError("Qwen3-ASR: " + msg);
                 });
-            } else if ("flushed".equals(status)) {
-                UpdateLog.i("AsrWS: flushed OK");
+            } else {
+                // 未知消息类型，防御性日志
+                UpdateLog.d("AsrWS: unknown message type=\"" + type + "\": " + text);
             }
         } catch (Exception e) {
             UpdateLog.e("AsrWS: parse message error", e);
