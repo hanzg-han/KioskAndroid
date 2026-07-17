@@ -50,7 +50,7 @@ public class SpeechManager {
     // ASR 累积文本
     private final StringBuilder mAsrFullText = new StringBuilder();
 
-    // chunk_boundary 相关（v2 协议）
+    // chunk_boundary 相关（ASR 协议 V1.0）
     private int mSilenceFrameCount = 0;
     private int mVoiceFrameCount = 0;
     private long mLastChunkBoundaryTime = 0;

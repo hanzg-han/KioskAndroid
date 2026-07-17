@@ -16,15 +16,17 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 /**
- * Qwen3-ASR WebSocket 客户端
+ * Qwen3-ASR WebSocket 客户端 (协议 V1.0)
  * 将 PCM int16 音频流式发送到 Qwen3-ASR 服务端获取识别文本
  *
  * 协议:
  *   1. 连接 ws://host:8765/ws/transcribe
- *   2. 发送握手: {"model":"1.7B","language":"Chinese"}
- *   3. 接收 {"status":"ready"}
+ *   2. 发送握手: {"model":"1.7B","language":"Chinese","clinic_mode":true}
+ *   3. 接收 {"status":"ready","chunk_sec":2.0,"session_id":"...","clinic_mode":...}
  *   4. 流式发送 PCM int16 binary frames
  *   5. 接收 {"type":"result","text":"...","is_final":false}
+ *   6. 发送 {"action":"chunk_boundary"} 或 {"action":"flush"}
+ *   7. 接收 {"status":"flushed"}
  */
 public class AsrWebSocketClient {
 
@@ -324,7 +326,7 @@ public class AsrWebSocketClient {
             } else if ("heartbeat".equals(type)) {
                 // 忽略心跳
             } else if ("status".equals(type)) {
-                // v2 新增：信号弱/静音跳过等状态通知
+                // V1.0 未定义，但保留防御性日志
                 String msg = obj.optString("msg", "");
                 UpdateLog.d("AsrWS: status: " + msg);
             } else if ("error".equals(type)) {
